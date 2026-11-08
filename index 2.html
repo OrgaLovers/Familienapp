@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2F6F5E">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Zuhause">
+<title>Zuhause – Family Organizer</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.109.0/dist/umd/supabase.js"></script>
+<style>
+:root{--bg:#EEF3EC;--card:#fff;--ink:#23332E;--mute:#6B7B74;--line:#DDE5DD;--brand:#2F6F5E;--soft:#DCEBE4;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141B18;--card:#1E2824;--ink:#E8EFEA;--mute:#9BAAA2;--line:#2C3A34;--brand:#5FB89C;--soft:#25362F;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141B18;--card:#1E2824;--ink:#E8EFEA;--mute:#9BAAA2;--line:#2C3A34;--brand:#5FB89C;--soft:#25362F;color-scheme:dark}
+*,*:before,*:after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',sans-serif}
+.card{background:var(--card);border:1px solid var(--line);border-radius:22px}
+.inp{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:8px 12px;color:var(--ink);font:inherit;min-width:0;width:100%}
+.inp:focus,button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.ghost{background:transparent;border:0;border-bottom:1px dashed var(--line);border-radius:0;padding:4px 2px}
+.btn{background:var(--brand);color:#fff;border-radius:12px;padding:8px 14px;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+:root[data-theme="dark"] .btn{color:#10201a}
+.mute{color:var(--mute)}
+.chip{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:600;background:var(--card)}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {useState,useEffect}=React;const h=htm.bind(React.createElement);
+const P=[{id:'me',n:'Me',c:'#E0566B'},{id:'partner',n:'Partner',c:'#3D8FD1'},{id:'c1',n:'Child 1',c:'#E9A21B'},{id:'c2',n:'Child 2',c:'#5BAA6B'}];
+const pc=id=>P.find(p=>p.id===id)||P[0];
+const pad=n=>String(n).padStart(2,'0');const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const NOW=new Date();const T0=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate());const TODAY=iso(T0);
+const addDays=n=>{const d=new Date(T0);d.setDate(d.getDate()+n);return iso(d)};
+const parts=s=>s.split('-').map(Number);
+const daysTo=s=>{const[,m,d]=parts(s);let n=new Date(T0.getFullYear(),m-1,d);if(n<T0)n=new Date(T0.getFullYear()+1,m-1,d);return Math.round((n-T0)/864e5)};
+const ago=s=>{const[y,m,d]=parts(s);return Math.round((T0-new Date(y,m-1,d))/864e5)};
+const uid=()=>Math.random().toString(36).slice(2,9);
+// ===== SUPABASE: hier deine Werte eintragen (siehe Anleitung) =====
+const SB_URL='https://wxljqaeqgqryvqeuqboa.supabase.co',SB_KEY='sb_publishable__uaRFyWcbF3-wQqCqqMssg_6bTyuVtk';
+// ==================================================================
+const sb=(SB_URL&&SB_KEY&&window.supabase)?window.supabase.createClient(SB_URL,SB_KEY):null;
+const store={},subs={},timers={},LOCAL=['fo-priv'];
+const emit=k=>(subs[k]||[]).forEach(f=>f(store[k]));
+const save=k=>{clearTimeout(timers[k]);timers[k]=setTimeout(()=>{const pv=k.startsWith('priv:');sb.from(pv?'private_data':'family_data').upsert({key:pv?k.slice(5):k,value:store[k],updated_at:new Date().toISOString()},pv?{onConflict:'owner,key'}:{}).then(r=>{if(r.error)console.error(r.error)})},400)};
+function useLS(k,init){
+  const loc=!sb||LOCAL.includes(k);
+  const[v,setV]=useState(()=>{if(loc){try{const r=localStorage.getItem(k);return r?JSON.parse(r):init}catch(e){return init}}return k in store?store[k]:init});
+  useEffect(()=>{
+    if(loc){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}return}
+    if(!(k in store)){store[k]=init;save(k)}
+    const f=x=>setV(x);(subs[k]=subs[k]||[]).push(f);return()=>{subs[k]=subs[k].filter(g=>g!==f)}
+  },[k,loc?v:0]);
+  const set=loc?setV:x=>{const n=typeof x==='function'?x(store[k]):x;store[k]=n;emit(k);save(k)};
+  return[v,set]}
+const upd=(set,id,p)=>set(a=>a.map(x=>x.id===id?{...x,...p}:x));const del=(set,id)=>set(a=>a.filter(x=>x.id!==id));
+const IC={cal:'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',cart:'M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 7H6M9 21h.01M18 21h.01',todo:'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',check:'M20 6 9 17l-5-5',plus:'M12 5v14M5 12h14',trash:'M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6',cake:'M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8M4 16s1.5-1 4-1 3.5 2 6 2 4-1 6-1M2 21h20M7 7v3M12 7v3M17 7v3',gift:'M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z',eye:'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',eyeoff:'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6',left:'m15 18-6-6 6-6',right:'m9 18 6-6-6-6',home:'M3 11l9-8 9 8M5 10v10h14V10',box:'M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8',lock:'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',link:'M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1',refresh:'M21 12a9 9 0 0 1-15.5 6.3L3 16M3 12A9 9 0 0 1 18.5 5.7L21 8M21 3v5h-5M3 21v-5h5',edit:'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',coin:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6v12M15 9h-4.5a2 2 0 0 0 0 4h3a2 2 0 0 1 0 4H9',shield:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',suit:'M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M4 7h16v13H4zM4 12h16',phone:'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z',bell:'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0'};
+const Ic=(n,s=18)=>h`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${IC[n]}/></svg>`;
+const Dot=({id,s=10})=>h`<span style=${{background:pc(id).c,width:s,height:s,borderRadius:99,display:'inline-block',flex:'none'}}/>`;
+const Del=({on})=>h`<button onClick=${on} aria-label="Delete" class="mute hover:text-red-500 p-1">${Ic('trash',16)}</button>`;
+const Head=({ic,t,sub,col})=>h`<div class="flex items-center gap-3 mb-4"><span class="grid place-items-center w-10 h-10 rounded-2xl text-white" style=${{background:col}}>${Ic(ic,20)}</span><div><h2 class="text-xl font-extrabold leading-tight">${t}</h2>${sub&&h`<p class="text-sm mute">${sub}</p>`}</div></div>`;
+const PSel=({v,on})=>h`<select class="inp" style=${{width:'auto'}} value=${v} onChange=${e=>on(e.target.value)}>${P.map(p=>h`<option key=${p.id} value=${p.id}>${p.n}</option>`)}</select>`;
+const enter=fn=>e=>{if(e.key==='Enter')fn()};
+
+const hit=(e,k)=>e.rep&&e.rep.length?k>=e.d&&e.rep.includes((new Date(...parts(k).map((v,i)=>i===1?v-1:v)).getDay()+6)%7):e.d===k;
+const WD=['Mo','Tu','We','Th','Fr','Sa','Su'];
+function Cal(){
+  const[ev,setEv]=useLS('fo-ev',[{id:uid(),t:'Kita pickup',p:'c1',d:TODAY,tm:'16:00'},{id:uid(),t:'Dentist',p:'me',d:addDays(1),tm:'09:30'},{id:uid(),t:'Football practice',p:'c2',d:addDays(2),tm:'17:00'},{id:uid(),t:'Date night',p:'partner',d:addDays(3),tm:'19:30'},{id:uid(),t:'Family brunch',p:'me',d:addDays(5),tm:'10:30'}]);
+  const[ym,setYm]=useState([NOW.getFullYear(),NOW.getMonth()]);const[sel,setSel]=useState(TODAY);const[f,setF]=useState('all');
+  const[t,setT]=useState('');const[p,setP]=useState('me');const[tm,setTm]=useState('');const[te,setTe]=useState('');const[pl,setPl]=useState('');const[rep,setRep]=useState([]);const[nt,setNt]=useState('');
+  const[y,m]=ym;const off=(new Date(y,m,1).getDay()+6)%7;const n=new Date(y,m+1,0).getDate();
+  const cells=[...Array(off).fill(null),...Array.from({length:n},(_,i)=>i+1)];
+  const vis=ev.filter(e=>f==='all'||e.p===f);
+  const day=vis.filter(e=>hit(e,sel)).sort((a,b)=>(a.tm||'').localeCompare(b.tm||''));
+  const go=k=>{const d=new Date(y,m+k,1);setYm([d.getFullYear(),d.getMonth()])};
+  const add=()=>{if(!t.trim())return;const base={t:t.trim(),p,tm,te:tm?te:'',pl:pl.trim(),nt:nt.trim()};const[sy,sm,sd]=parts(sel);const dow=(new Date(sy,sm-1,sd).getDay()+6)%7;const dates=[...new Set([sel,...rep.map(i=>iso(new Date(sy,sm-1,sd-dow+i)))])];setEv(a=>[...a,...dates.map(d=>({id:uid(),d,...base}))]);setT('');setTm('');setTe('');setPl('');setNt('');setRep([])};
+  return h`<section class="card p-5"><${Head} ic="cal" t="Family calendar" sub="Tap a day to see or add plans" col="#3D8FD1"/>
+  <div class="flex flex-wrap gap-2 mb-4"><button class="chip" style=${f==='all'?{background:'var(--brand)',color:'#fff',borderColor:'var(--brand)'}:{}} onClick=${()=>setF('all')}>Everyone</button>
+  ${P.map(q=>h`<button key=${q.id} class="chip flex items-center gap-2" style=${f===q.id?{background:q.c,color:'#fff',borderColor:q.c}:{}} onClick=${()=>setF(q.id)}>${f!==q.id&&h`<${Dot} id=${q.id} s=${8}/>`}${q.n}</button>`)}</div>
+  <div class="flex items-center justify-between mb-2"><button class="p-2" aria-label="Previous month" onClick=${()=>go(-1)}>${Ic('left')}</button><b class="text-lg">${new Date(y,m,1).toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</b><button class="p-2" aria-label="Next month" onClick=${()=>go(1)}>${Ic('right')}</button></div>
+  <div class="grid grid-cols-7 gap-1 text-center text-xs mute mb-1">${['Mo','Tu','We','Th','Fr','Sa','Su'].map(d=>h`<div key=${d}>${d}</div>`)}</div>
+  <div class="grid grid-cols-7 gap-1">${cells.map((d,i)=>{if(!d)return h`<div key=${'x'+i}/>`;const k=`${y}-${pad(m+1)}-${pad(d)}`;const es=vis.filter(e=>hit(e,k));const on=k===sel;
+    return h`<button key=${k} onClick=${()=>setSel(k)} class="rounded-xl py-1.5 flex flex-col items-center gap-1 min-h-[52px]" style=${{background:on?'var(--brand)':k===TODAY?'var(--soft)':'transparent',color:on?'#fff':'inherit',fontWeight:k===TODAY?800:500}}><span class="text-sm">${d}</span><span class="flex gap-0.5 h-2">${es.slice(0,4).map(e=>h`<${Dot} key=${e.id} id=${e.p} s=${6}/>`)}</span></button>`})}</div>
+  <div class="mt-4 pt-4" style=${{borderTop:'1px solid var(--line)'}}><p class="font-bold mb-2">${new Date(...parts(sel).map((x,i)=>i===1?x-1:x)).toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</p>
+  ${day.length===0&&h`<p class="text-sm mute mb-2">Nothing planned. Add the first thing below.</p>`}
+  ${day.map(e=>h`<div key=${e.id} class="flex items-center gap-3 py-1.5"><${Dot} id=${e.p} s=${12}/><span class="text-sm mute flex-none" style=${{width:92}}>${e.tm?(e.te?e.tm+'–'+e.te:e.tm):'all day'}</span><span class="flex-1 min-w-0"><b class="block">${e.t}</b>${e.pl&&h`<span class="text-xs mute block">📍 ${e.pl}</span>`}${e.nt&&h`<span class="text-xs mute block">📝 ${e.nt}</span>`}</span><span class="text-xs mute">${pc(e.p).n}</span><${Del} on=${()=>del(setEv,e.id)}/></div>`)}
+  <div class="flex flex-wrap gap-2 mt-3"><input class="inp" style=${{flex:'1 1 150px'}} placeholder="New event" value=${t} onInput=${e=>setT(e.target.value)} onKeyDown=${enter(add)}/><input type="time" class="inp" style=${{width:108}} aria-label="Start time" value=${tm} onChange=${e=>setTm(e.target.value)}/><span class="mute">to</span><input type="time" class="inp" style=${{width:108}} aria-label="End time (optional)" value=${te} onChange=${e=>setTe(e.target.value)}/><${PSel} v=${p} on=${setP}/><button class="btn" onClick=${add}>${Ic('plus',16)}Add</button></div><input class="inp mt-2" placeholder="Place (optional), e.g. Office, Musterstr. 5" value=${pl} onInput=${e=>setPl(e.target.value)} aria-label="Place"/><input class="inp mt-2" placeholder="Note (optional), e.g. take ID" value=${nt} onInput=${e=>setNt(e.target.value)} aria-label="Note"/><div class="flex flex-wrap items-center gap-1.5 mt-2"><span class="text-sm mute">Also add to this week:</span>${WD.map((w,i)=>h`<button key=${w} class="chip" aria-pressed=${rep.includes(i)} style=${rep.includes(i)?{background:pc(p).c,color:'#fff',borderColor:pc(p).c}:{}} onClick=${()=>setRep(r=>r.includes(i)?r.filter(z=>z!==i):[...r,i])}>${w}</button>`)}</div>${rep.length>0&&h`<p class="text-xs mute mt-1">Adds a separate copy to each chosen day of this week only, so you can change single days later.</p>`}</div></section>`;
+}
+
+function Grocery({g,setG}){
+  const[t,setT]=useState('');
+  const add=()=>{if(!t.trim())return;setG(a=>[{id:uid(),t:t.trim(),done:false},...a]);setT('')};
+  const left=g.filter(x=>!x.done).length;
+  return h`<section class="card p-5"><${Head} ic="cart" t="Grocery list" sub=${left+' left to buy'} col="#5BAA6B"/>
+  <div class="flex gap-2 mb-3"><input class="inp" placeholder="Add item" value=${t} onInput=${e=>setT(e.target.value)} onKeyDown=${enter(add)}/><button class="btn" onClick=${add} aria-label="Add item">${Ic('plus',16)}</button></div>
+  ${g.length===0&&h`<p class="text-sm mute">List is empty. Add what you need.</p>`}
+  ${[...g].sort((a,b)=>a.done-b.done).map(x=>h`<div key=${x.id} class="flex items-center gap-3 py-1.5"><button onClick=${()=>upd(setG,x.id,{done:!x.done})} aria-label="Toggle" class="grid place-items-center w-6 h-6 rounded-lg" style=${{border:'2px solid var(--brand)',background:x.done?'var(--brand)':'transparent',color:'#fff'}}>${x.done&&Ic('check',14)}</button><span class="flex-1" style=${{textDecoration:x.done?'line-through':'none',opacity:x.done?.5:1}}>${x.t}</span><${Del} on=${()=>del(setG,x.id)}/></div>`)}
+  ${g.some(x=>x.done)&&h`<button class="text-sm mute mt-2 underline" onClick=${()=>setG(a=>a.filter(x=>!x.done))}>Clear bought items</button>`}</section>`;
+}
+
+function ChoresOld(){
+  const[c,setC]=useLS('fo-chores',[{id:uid(),t:'Take out recycling',p:'partner',done:false},{id:uid(),t:'Pack swim bag',p:'c1',done:false},{id:uid(),t:'Tidy the Lego corner',p:'c2',done:true},{id:uid(),t:'Book pediatrician',p:'me',done:false}]);
+  const[t,setT]=useState('');const[p,setP]=useState('me');
+  const add=()=>{if(!t.trim())return;setC(a=>[...a,{id:uid(),t:t.trim(),p,done:false}]);setT('')};
+  return h`<section class="card p-5"><${Head} ic="todo" t="Chores & to-dos" sub="Who does what this week" col="#E0566B"/>
+  <div class="grid grid-cols-2 gap-2 mb-4">${P.map(q=>{const l=c.filter(x=>x.p===q.id);const d=l.filter(x=>x.done).length;return h`<div key=${q.id} class="rounded-xl p-2" style=${{background:'var(--bg)'}}><div class="flex justify-between text-xs font-bold"><span>${q.n}</span><span class="mute">${d}/${l.length}</span></div><div class="h-2 rounded-full mt-1.5" style=${{background:'var(--line)'}}><div class="h-2 rounded-full" style=${{width:(l.length?d/l.length*100:0)+'%',background:q.c,transition:'width .3s'}}/></div></div>`})}</div>
+  <div class="flex gap-2 mb-3"><input class="inp" placeholder="New to-do" value=${t} onInput=${e=>setT(e.target.value)} onKeyDown=${enter(add)}/><${PSel} v=${p} on=${setP}/><button class="btn" onClick=${add} aria-label="Add to-do">${Ic('plus',16)}</button></div>
+  ${[...c].sort((a,b)=>a.done-b.done).map(x=>h`<div key=${x.id} class="flex items-center gap-3 py-1.5"><button onClick=${()=>upd(setC,x.id,{done:!x.done})} aria-label="Toggle" class="grid place-items-center w-6 h-6 rounded-full" style=${{border:'2px solid '+pc(x.p).c,background:x.done?pc(x.p).c:'transparent',color:'#fff'}}>${x.done&&Ic('check',14)}</button><span class="flex-1" style=${{textDecoration:x.done?'line-through':'none',opacity:x.done?.5:1}}>${x.t}</span><button class="chip flex items-center gap-1.5" onClick=${()=>upd(setC,x.id,{p:P[(P.findIndex(q=>q.id===x.p)+1)%4].id})} title="Tap to reassign"><${Dot} id=${x.p} s=${8}/>${pc(x.p).n}</button><${Del} on=${()=>del(setC,x.id)}/></div>`)}</section>`;
+}
+
+const YN=({label,v,on})=>h`<button onClick=${on} class="chip flex items-center gap-1.5" style=${v?{background:'#5BAA6B',color:'#fff',borderColor:'#5BAA6B'}:{}}>${v&&Ic('check',13)}${label}: ${v?'Yes':'No'}</button>`;
+
+function Birthdays(){
+  const[b,setB]=useLS('fo-bd',[{id:uid(),n:'Emma (Kita friend)',d:'2020-11-22',inv:true,gift:false,thx:false},{id:uid(),n:'Oma Hannelore',d:'1955-12-03',inv:true,gift:true,thx:false},{id:uid(),n:'Leon (cousin)',d:'2019-12-18',inv:false,gift:false,thx:false},{id:uid(),n:'Onkel Markus',d:'1982-01-09',inv:false,gift:false,thx:false}]);
+  const[n,setN]=useState('');const[d,setD]=useState('');
+  const add=()=>{if(!n.trim()||!d)return;setB(a=>[...a,{id:uid(),n:n.trim(),d,inv:false,gift:false,thx:false}]);setN('');setD('')};
+  const L=[...b].sort((x,y)=>daysTo(x.d)-daysTo(y.d));
+  return h`<section class="card p-5"><${Head} ic="cake" t="Birthdays" sub="Invitations, party details & gifts" col="#E9A21B"/>
+  <div class="flex flex-wrap gap-2 mb-4"><input class="inp" style=${{flex:'1 1 150px'}} placeholder="Name" value=${n} onInput=${e=>setN(e.target.value)} onKeyDown=${enter(add)}/><input type="date" class="inp" style=${{width:150}} value=${d} onChange=${e=>setD(e.target.value)}/><button class="btn" onClick=${add}>${Ic('plus',16)}Add</button></div>
+  ${L.length===0&&h`<p class="text-sm mute">No birthdays yet. Add one above.</p>`}
+  ${L.map(x=>{const k=daysTo(x.d);const age=new Date(T0.getTime()+k*864e5).getFullYear()-parts(x.d)[0];const done=x.inv&&x.gift;
+    return h`<div key=${x.id} class="rounded-2xl p-3 mb-3" style=${{background:'var(--bg)',border:k<=14&&!done?'2px solid #E9A21B':'1px solid var(--line)'}}>
+    <div class="flex items-center gap-3"><div class="text-center w-14 flex-none"><div class="text-2xl font-extrabold leading-none">${k===0?'Today':k}</div><div class="text-xs mute">${k===0?'🎉':k===1?'day':'days'}</div></div>
+    <div class="flex-1 min-w-0"><div class="font-bold truncate">${x.n}</div><div class="text-sm mute">${new Date(...parts(x.d).map((v,i)=>i===1?v-1:v)).toLocaleDateString('en-GB',{day:'numeric',month:'long'})}${age>0&&age<120?' · turns '+age:''}</div></div><${Del} on=${()=>del(setB,x.id)}/></div>
+    <div class="flex flex-wrap gap-2 mt-2"><${YN} label="Invited" v=${x.inv} on=${()=>upd(setB,x.id,{inv:!x.inv})}/><${YN} label="Gift bought" v=${x.gift} on=${()=>upd(setB,x.id,{gift:!x.gift})}/></div>${x.inv&&h`<div class="mt-3 grid sm:grid-cols-2 gap-2"><label class="text-xs mute">When is the party?<input type="datetime-local" class="inp mt-1" value=${x.pd||''} onChange=${e=>upd(setB,x.id,{pd:e.target.value})}/></label><label class="text-xs mute">Where (place & address)<input class="inp mt-1" placeholder="e.g. Kinderwelt, Musterstr. 5, 80331 München" value=${x.pa||''} onInput=${e=>upd(setB,x.id,{pa:e.target.value})}/></label>${x.pa&&h`<a class="text-sm underline flex items-center gap-1" style=${{color:'var(--brand)'}} target="_blank" rel="noopener" href=${'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(x.pa)}>${Ic('link',14)}Open in Maps</a>`}</div>`}</div>`})}</section>`;
+}
+
+const ST={keep:['Keep','#5BAA6B'],donate:['Donate','#3D8FD1'],sell:['Sell','#E9A21B']};
+function Toys(){
+  const[t,setT]=useLS('fo-toys',[{id:uid(),n:'Lego brick box',k:'c1',s:'keep',last:addDays(-12)},{id:uid(),n:'Broken wooden train',k:'c2',s:'donate',last:addDays(-80)},{id:uid(),n:'100-piece puzzle (done 50x)',k:'c1',s:'sell',last:addDays(-30)}]);
+  const[n,setN]=useState('');const[k,setK]=useState('c1');
+  const add=()=>{if(!n.trim())return;setT(a=>[{id:uid(),n:n.trim(),k,s:'keep',last:TODAY},...a]);setN('')};
+  return h`<section class="card p-5"><${Head} ic="box" t="Geschenke misten" sub="Declutter before new gifts arrive" col="#8A5FBF"/>
+  <div class="flex gap-2 mb-3">${Object.entries(ST).map(([id,[l,c]])=>h`<div key=${id} class="flex-1 rounded-xl p-2 text-center" style=${{background:c+'22'}}><div class="text-xl font-extrabold" style=${{color:c}}>${t.filter(x=>x.s===id).length}</div><div class="text-xs mute">${l}</div></div>`)}</div>
+  <div class="flex gap-2 mb-3"><input class="inp" placeholder="Toy or item" value=${n} onInput=${e=>setN(e.target.value)} onKeyDown=${enter(add)}/><select class="inp" style=${{width:'auto'}} value=${k} onChange=${e=>setK(e.target.value)}><option value="c1">Child 1</option><option value="c2">Child 2</option></select><button class="btn" onClick=${add} aria-label="Add toy">${Ic('plus',16)}</button></div>
+  ${t.length===0&&h`<p class="text-sm mute">No toys listed. Start with one room.</p>`}
+  ${t.map(x=>{const a=ago(x.last);return h`<div key=${x.id} class="py-2" style=${{borderTop:'1px solid var(--line)'}}><div class="flex items-center gap-2"><${Dot} id=${x.k}/><span class="flex-1 font-semibold">${x.n}</span><${Del} on=${()=>del(setT,x.id)}/></div>
+  <div class="flex flex-wrap items-center gap-2 mt-1.5"><div class="flex rounded-xl overflow-hidden" style=${{border:'1px solid var(--line)'}}>${Object.entries(ST).map(([id,[l,c]])=>h`<button key=${id} onClick=${()=>upd(setT,x.id,{s:id,last:TODAY})} class="px-3 py-1 text-sm font-semibold" style=${x.s===id?{background:c,color:'#fff'}:{}}>${l}</button>`)}</div>
+  <button onClick=${()=>upd(setT,x.id,{last:TODAY})} class="text-xs flex items-center gap-1 ml-auto" style=${{color:a>60?'#D98A00':'var(--mute)'}}>${Ic('refresh',13)}Checked ${a===0?'today':a+' days ago'}${a>60?' · recheck':''}</button></div></div>`})}</section>`;
+}
+
+function Wishes(){
+  const[wS,setWS]=useLS('fo-wish',[]);const[wP,setWP]=useLS('priv:fo-wish-priv',[]);const w=[...wP,...wS];const setW=fn=>{const n=typeof fn==='function'?fn(w):fn;setWP(n.filter(x=>x.secret));setWS(n.filter(x=>!x.secret))};useEffect(()=>{const sec=wS.filter(x=>x.secret);if(sec.length){setWP(a=>[...sec,...a]);setWS(a=>a.filter(x=>!x.secret))}},[]);
+  const[privacy,setPrivacy]=useLS('fo-priv',false);const[fl,setFl]=useState('all');
+  const[F,setF]=useState({who:'',idea:'',price:'',link:'',secret:false});
+  const add=()=>{if(!F.who.trim()||!F.idea.trim())return;setW(a=>[{id:uid(),...F,got:false},...a]);setF({...F,idea:'',price:'',link:'',secret:false})};
+  const names=[...new Set(w.map(x=>x.who))];const L=w.filter(x=>fl==='all'||x.who===fl);
+  const tot=L.filter(x=>!x.got&&!(privacy&&x.secret)).reduce((s,x)=>s+(parseFloat(String(x.price).replace(',','.'))||0),0);
+  const set=(k,v)=>setF(o=>({...o,[k]:v}));
+  return h`<div class="max-w-3xl mx-auto"><section class="card p-5"><${Head} ic="gift" t="Wunschlisten übers Jahr" sub="Jot ideas down the moment someone mentions them" col="#E0566B"/>
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2"><input class="inp" list="names" placeholder="Name (who is it for?)" value=${F.who} onInput=${e=>set('who',e.target.value)}/><datalist id="names">${[...P.map(p=>p.n),...names].map(x=>h`<option key=${x} value=${x}/>`)}</datalist>
+  <input class="inp" placeholder="Gift idea" value=${F.idea} onInput=${e=>set('idea',e.target.value)} onKeyDown=${enter(add)}/><input class="inp" inputmode="decimal" placeholder="Estimated price (€)" value=${F.price} onInput=${e=>set('price',e.target.value)}/><input class="inp" placeholder="Link / store" value=${F.link} onInput=${e=>set('link',e.target.value)} onKeyDown=${enter(add)}/></div>
+  <div class="flex items-center justify-between mt-3"><label class="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked=${F.secret} onChange=${e=>set('secret',e.target.checked)}/>${Ic('lock',15)}Secret: only visible to me</label><button class="btn" onClick=${add}>${Ic('plus',16)}Save idea</button></div></section>
+  <div class="flex flex-wrap items-center gap-2 my-4"><button class="chip" style=${fl==='all'?{background:'var(--brand)',color:'#fff'}:{}} onClick=${()=>setFl('all')}>All</button>${names.map(x=>h`<button key=${x} class="chip" style=${fl===x?{background:'var(--brand)',color:'#fff'}:{}} onClick=${()=>setFl(x)}>${x}</button>`)}
+  <button class="chip flex items-center gap-1.5 ml-auto" onClick=${()=>setPrivacy(!privacy)} style=${privacy?{background:'#E0566B',color:'#fff',borderColor:'#E0566B'}:{}}>${Ic(privacy?'eyeoff':'eye',14)}${privacy?'Secret ideas hidden':'Hide secrets (shared screen)'}</button></div>
+  <p class="text-sm mute mb-3">Open ideas total: <b style=${{color:'var(--ink)'}}>${tot.toFixed(2).replace('.',',')} €</b></p>
+  ${L.length===0&&h`<p class="mute text-sm">No ideas here yet. Add the first one above.</p>`}
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${L.map(x=>{const hid=privacy&&x.secret;return h`<div key=${x.id} class="card p-4" style=${{opacity:x.got?.55:1,borderColor:x.secret?'#E0566B':'var(--line)'}}>
+  <div class="flex items-center gap-2 mb-2"><b class="flex-1 truncate">${x.who}</b>${x.secret&&h`<span class="text-xs flex items-center gap-1" style=${{color:'#E0566B'}}>${Ic('lock',12)}Secret</span>`}<${Del} on=${()=>del(setW,x.id)}/></div>
+  ${hid?h`<div class="py-6 text-center mute text-sm">${Ic('lock',22)}<div>Secret idea hidden</div></div>`:h`<div class="space-y-1"><input class="inp ghost font-semibold" value=${x.idea} onInput=${e=>upd(setW,x.id,{idea:e.target.value})} aria-label="Gift idea"/><div class="flex gap-2"><input class="inp ghost" style=${{width:90}} inputmode="decimal" value=${x.price} onInput=${e=>upd(setW,x.id,{price:e.target.value})} placeholder="Price €" aria-label="Price"/><input class="inp ghost" value=${x.link} onInput=${e=>upd(setW,x.id,{link:e.target.value})} placeholder="Link / store" aria-label="Link or store"/></div></div>
+  <div class="flex items-center justify-between mt-3 text-sm"><label class="flex items-center gap-2"><input type="checkbox" checked=${x.secret} onChange=${e=>upd(setW,x.id,{secret:e.target.checked})}/>Secret</label><label class="flex items-center gap-2"><input type="checkbox" checked=${x.got} onChange=${e=>upd(setW,x.id,{got:e.target.checked})}/>Bought</label></div>`}</div>`})}</div></div>`;
+}
+
+const CK=({d,on,c='var(--brand)'})=>h`<button onClick=${on} aria-label="Toggle" class="grid place-items-center w-6 h-6 rounded-lg flex-none" style=${{border:'2px solid '+c,background:d?c:'transparent',color:'#fff'}}>${d&&Ic('check',14)}</button>`;
+const Add=({ph,on})=>{const[v,setV]=useState('');const go=()=>{if(v.trim()){on(v.trim());setV('')}};return h`<div class="flex gap-2 mt-2"><input class="inp" placeholder=${ph} value=${v} onInput=${e=>setV(e.target.value)} onKeyDown=${enter(go)}/><button class="btn" onClick=${go} aria-label=${ph}>${Ic('plus',16)}</button></div>`};
+const lab=id=>(P.find(p=>p.id===id)||{n:id}).n;const num=s=>parseFloat(String(s).replace(',','.'))||0;
+const Sel=({v,on,o})=>h`<select class="inp" style=${{width:'auto'}} value=${v} onChange=${e=>on(e.target.value)}>${o.map(x=>h`<option key=${x} value=${x}>${lab(x)}</option>`)}</select>`;
+
+function Chores(){
+  const[c,setC]=useLS('fo-cats',[{id:uid(),n:'Wohnung',o:true,it:[{id:uid(),t:'Fenster putzen',p:'me',d:false},{id:uid(),t:'Keller aufräumen',p:'partner',d:false},{id:uid(),t:'Bad neu abdichten',p:'partner',d:false}]},{id:uid(),n:'Familie & Kinder',o:true,it:[{id:uid(),t:'Schwimmtasche packen',p:'c1',d:false},{id:uid(),t:'Kinderarzt-Termin buchen',p:'me',d:false}]}]);
+  const[pp,setPp]=useState('me');
+  const setCat=(id,f)=>setC(a=>a.map(x=>x.id===id?f(x):x));
+  const setIt=(k,i,p)=>setCat(k,y=>({...y,it:y.it.map(z=>z.id===i?{...z,...p}:z)}));
+  return h`<section class="card p-5"><${Head} ic="todo" t="To-dos by area" sub="Create big areas, then add tasks to each" col="#E0566B"/>
+  ${c.map(k=>{const dn=k.it.filter(x=>x.d).length;return h`<div key=${k.id} class="rounded-2xl p-3 mb-3" style=${{background:'var(--bg)'}}>
+  <div class="flex items-center gap-2"><button onClick=${()=>setCat(k.id,x=>({...x,o:!x.o}))} aria-label="Expand" style=${{transform:k.o?'rotate(90deg)':'none',transition:'transform .2s'}}>${Ic('right')}</button><input class="inp ghost font-extrabold flex-1" value=${k.n} onInput=${e=>setCat(k.id,x=>({...x,n:e.target.value}))} aria-label="Area name"/><span class="text-xs mute">${dn}/${k.it.length}</span><${Del} on=${()=>del(setC,k.id)}/></div>
+  <div class="h-1.5 rounded-full my-2" style=${{background:'var(--line)'}}><div class="h-1.5 rounded-full" style=${{width:(k.it.length?dn/k.it.length*100:0)+'%',background:'var(--brand)',transition:'width .3s'}}/></div>
+  ${k.o&&h`<div>${k.it.map(x=>h`<div key=${x.id} class="flex items-center gap-2 py-1"><${CK} d=${x.d} c=${pc(x.p).c} on=${()=>setIt(k.id,x.id,{d:!x.d})}/><input class="inp ghost flex-1" style=${{textDecoration:x.d?'line-through':'none',opacity:x.d?.5:1}} value=${x.t} onInput=${e=>setIt(k.id,x.id,{t:e.target.value})} aria-label="Task"/><button class="chip flex items-center gap-1.5" title="Tap to reassign" onClick=${()=>setIt(k.id,x.id,{p:P[(P.findIndex(q=>q.id===x.p)+1)%P.length].id})}><${Dot} id=${x.p} s=${8}/>${pc(x.p).n}</button><${Del} on=${()=>setCat(k.id,y=>({...y,it:y.it.filter(z=>z.id!==x.id)}))}/></div>`)}
+  <div class="flex items-center gap-2 mt-1"><${PSel} v=${pp} on=${setPp}/><div class="flex-1"><${Add} ph="Add task" on=${t=>setCat(k.id,y=>({...y,it:[...y.it,{id:uid(),t,p:pp,d:false}]}))}/></div></div></div>`}</div>`})}
+  <${Add} ph="New area, e.g. Garten" on=${n=>setC(a=>[...a,{id:uid(),n,o:true,it:[]}])}/></section>`;
+}
+
+const DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const DISH={spaghetti:'Spaghetti, Hackfleisch, Tomatensauce, Zwiebeln, Parmesan',pfannkuchen:'Mehl, Eier, Milch, Zucker',lasagne:'Lasagneplatten, Hackfleisch, Tomatensauce, Käse',kartoffelsuppe:'Kartoffeln, Karotten, Zwiebeln, Brühe, Würstchen',pizza:'Pizzateig, Tomatensauce, Mozzarella, Salami',nudeln:'Nudeln, Pesto, Parmesan',reis:'Reis, Gemüse, Hähnchen'};
+const guess=n=>{const k=Object.keys(DISH).find(k=>n.toLowerCase().includes(k));return k?DISH[k]:''};
+function Meals({gro,setGro}){
+  const[m,setM]=useLS('fo-meals',{0:[{id:uid(),t:'Spaghetti Bolognese',i:DISH.spaghetti,a:false}],2:[{id:uid(),t:'Pfannkuchen',i:DISH.pfannkuchen,a:false}],5:[{id:uid(),t:'Pizza',i:DISH.pizza,a:false}]});
+  const today=(NOW.getDay()+6)%7;
+  const setMeal=(d,id,p)=>setM(o=>({...o,[d]:(o[d]||[]).map(x=>x.id===id?{...x,...p}:x)}));
+  const push=(d,x)=>{const have=new Set(gro.map(g=>g.t.toLowerCase()));const it=x.i.split(',').map(s=>s.trim()).filter(s=>s&&!have.has(s.toLowerCase()));setGro(a=>[...it.map(t=>({id:uid(),t,done:false})),...a]);setMeal(d,x.id,{a:true})};
+  return h`<div class="grid lg:grid-cols-5 gap-5"><section class="card p-5 lg:col-span-3"><${Head} ic="cart" t="Weekly meal plan" sub="Was kochen wir heute? Monday to Sunday" col="#F97316"/>
+  ${DAYS.map((D,d)=>h`<div key=${d} class="rounded-2xl p-3 mb-3" style=${{background:'var(--bg)',border:d===today?'2px solid var(--brand)':'1px solid var(--line)'}}><b>${D}${d===today?' (today)':''}</b>
+  ${(m[d]||[]).map(x=>h`<div key=${x.id} class="mt-2 rounded-xl p-2" style=${{background:'var(--card)'}}><div class="flex items-center gap-2"><input class="inp ghost font-semibold flex-1" value=${x.t} onInput=${e=>setMeal(d,x.id,{t:e.target.value})} aria-label="Meal"/><${Del} on=${()=>setM(o=>({...o,[d]:o[d].filter(y=>y.id!==x.id)}))}/></div>
+  <input class="inp ghost text-sm" placeholder="Ingredients, comma separated" value=${x.i} onInput=${e=>setMeal(d,x.id,{i:e.target.value,a:false})} aria-label="Ingredients"/>
+  </div>`)}
+  <${Add} ph="Add a meal" on=${t=>setM(o=>({...o,[d]:[...(o[d]||[]),{id:uid(),t,i:guess(t),a:false}]}))}/></div>`)}</section>
+  <div class="lg:col-span-2"><${Grocery} g=${gro} setG=${setGro}/></div></div>`;
+}
+
+function FinanceOld(){
+  const[ex,setEx]=useLS('fo-mem',['Joint account','Nana']);
+  const[L,setL]=useLS('fo-ledger',[{id:uid(),f:'partner',t:'Joint account',a:'120',n:'Groceries advance',d:false},{id:uid(),f:'Nana',t:'Joint account',a:'50',n:'Share of heating',d:false},{id:uid(),f:'Joint account',t:'me',a:'35',n:'Pediatrician paid by me',d:false}]);
+  const[F,setF]=useLS('fo-funds',[{id:uid(),n:'Vacation Fund 2027',g:'3000',s:'850',m:['me','partner']},{id:uid(),n:'Kids’ renovations',g:'1200',s:'200',m:['me','partner','c1','c2']}]);
+  const mem=[...P.map(p=>p.id),...ex];
+  const bal={};L.filter(x=>!x.d).forEach(x=>{bal[x.t]=(bal[x.t]||0)+num(x.a);bal[x.f]=(bal[x.f]||0)-num(x.a)});
+  const eu=n=>n.toFixed(2).replace('.',',')+' €';
+  const setE=(id,p)=>upd(setL,id,p);
+  return h`<div class="grid lg:grid-cols-5 gap-5"><section class="card p-5 lg:col-span-3"><${Head} ic="coin" t="Who owes whom" sub="Das 3-Generationen-Finanznetzwerk" col="#3D8FD1"/>
+  <div class="flex flex-wrap gap-2 mb-4">${Object.keys(bal).length===0&&h`<span class="text-sm mute">All settled.</span>`}${Object.entries(bal).map(([k,v])=>h`<span key=${k} class="chip" style=${{borderColor:v>=0?'#5BAA6B':'#E0566B',color:v>=0?'#3E8E50':'#E0566B'}}>${lab(k)}: ${v>=0?'gets ':'owes '}${eu(Math.abs(v))}</span>`)}</div>
+  ${L.map(x=>h`<div key=${x.id} class="rounded-2xl p-3 mb-2" style=${{background:'var(--bg)',opacity:x.d?.5:1}}><div class="flex flex-wrap items-center gap-2"><${CK} d=${x.d} on=${()=>setE(x.id,{d:!x.d})}/><${Sel} v=${x.f} o=${mem} on=${v=>setE(x.id,{f:v})}/><span class="text-sm mute">owes</span><${Sel} v=${x.t} o=${mem} on=${v=>setE(x.id,{t:v})}/><input class="inp" style=${{width:90}} inputmode="decimal" placeholder="€" value=${x.a} onInput=${e=>setE(x.id,{a:e.target.value})} aria-label="Amount"/><${Del} on=${()=>del(setL,x.id)}/></div><input class="inp ghost mt-1 text-sm" placeholder="What for?" value=${x.n} onInput=${e=>setE(x.id,{n:e.target.value})} aria-label="Note"/></div>`)}
+  <button class="btn mt-2" onClick=${()=>setL(a=>[...a,{id:uid(),f:'partner',t:'Joint account',a:'',n:'',d:false}])}>${Ic('plus',16)}Add entry</button>
+  <p class="text-xs mute mt-4">Tick an entry when it is paid back. Need another person or account (Opa, Savings)?</p><${Add} ph="New member or account" on=${n=>setEx(a=>[...a,n])}/></section>
+  <section class="card p-5 lg:col-span-2"><${Head} ic="coin" t="Funds & custom fields" sub="Your own pots with assigned members" col="#5BAA6B"/>
+  ${F.map(f=>{const pr=num(f.g)?Math.min(100,num(f.s)/num(f.g)*100):0;return h`<div key=${f.id} class="rounded-2xl p-3 mb-3" style=${{background:'var(--bg)'}}><div class="flex items-center gap-2"><input class="inp ghost font-extrabold flex-1" value=${f.n} onInput=${e=>upd(setF,f.id,{n:e.target.value})} aria-label="Fund name"/><${Del} on=${()=>del(setF,f.id)}/></div>
+  <div class="flex gap-2 my-2 text-sm"><label class="flex-1 mute">Saved €<input class="inp" inputmode="decimal" value=${f.s} onInput=${e=>upd(setF,f.id,{s:e.target.value})}/></label><label class="flex-1 mute">Goal €<input class="inp" inputmode="decimal" value=${f.g} onInput=${e=>upd(setF,f.id,{g:e.target.value})}/></label></div>
+  <div class="h-2 rounded-full" style=${{background:'var(--line)'}}><div class="h-2 rounded-full" style=${{width:pr+'%',background:'#5BAA6B',transition:'width .3s'}}/></div><p class="text-xs mute mt-1">${Math.round(pr)}% reached</p>
+  <div class="flex flex-wrap gap-1.5 mt-2">${mem.map(id=>{const on=f.m.includes(id);return h`<button key=${id} class="chip" style=${on?{background:'var(--brand)',color:'#fff',borderColor:'var(--brand)'}:{}} onClick=${()=>upd(setF,f.id,{m:on?f.m.filter(z=>z!==id):[...f.m,id]})}>${lab(id)}</button>`})}</div></div>`})}
+  <${Add} ph="New fund, e.g. Sommerurlaub 2027" on=${n=>setF(a=>[...a,{id:uid(),n,g:'',s:'0',m:[]}])}/></section></div>`;
+}
+
+const isTel=v=>/^[+\d][\d\s\/()-]{4,}$/.test(v.trim());
+function Sos(){
+  const[c,setC]=useLS('fo-sos',[{id:uid(),n:'Kinderarzt',f:[{id:uid(),l:'Praxis',v:'Dr. Beispiel'},{id:uid(),l:'Telefon',v:'089 123456'},{id:uid(),l:'Adresse',v:''}]},{id:uid(),n:'Krankenkassen',f:[{id:uid(),l:'Me: Versichertennr.',v:''},{id:uid(),l:'Child 1: Versichertennr.',v:''},{id:uid(),l:'Child 2: Versichertennr.',v:''}]},{id:uid(),n:'Notfallkontakte',f:[{id:uid(),l:'Notruf',v:'112'},{id:uid(),l:'Nachbar mit Ersatzschlüssel',v:''},{id:uid(),l:'Giftnotruf',v:''}]}]);
+  const[q,setQ]=useState('');
+  const setCard=(id,fn)=>setC(a=>a.map(x=>x.id===id?fn(x):x));
+  const shown=c.filter(x=>!q||JSON.stringify(x).toLowerCase().includes(q.toLowerCase()));
+  return h`<div><section class="card p-5 mb-5"><${Head} ic="shield" t="Wo ist nochmal...?" sub="Der digitale Notfall-Ordner. Search by name, number or note" col="#E0566B"/><input class="inp" placeholder="Search, e.g. Schlüssel" value=${q} onInput=${e=>setQ(e.target.value)}/><${Add} ph="New card, e.g. Allergien" on=${n=>setC(a=>[...a,{id:uid(),n,f:[]}])}/></section>
+  ${shown.length===0&&h`<p class="mute">Nothing found. Try another word.</p>`}
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">${shown.map(k=>h`<div key=${k.id} class="card p-4"><div class="flex items-center gap-2 mb-2"><input class="inp ghost font-extrabold flex-1" value=${k.n} onInput=${e=>setCard(k.id,x=>({...x,n:e.target.value}))} aria-label="Card title"/><${Del} on=${()=>del(setC,k.id)}/></div>
+  ${k.f.map(f=>h`<div key=${f.id} class="py-1.5" style=${{borderTop:'1px solid var(--line)'}}><div class="flex items-center gap-2"><input class="inp ghost text-xs mute flex-1" value=${f.l} onInput=${e=>setCard(k.id,x=>({...x,f:x.f.map(z=>z.id===f.id?{...z,l:e.target.value}:z)}))} aria-label="Label"/><${Del} on=${()=>setCard(k.id,x=>({...x,f:x.f.filter(z=>z.id!==f.id)}))}/></div><div class="flex items-center gap-2"><input class="inp ghost font-semibold flex-1" placeholder="Add value" value=${f.v} onInput=${e=>setCard(k.id,x=>({...x,f:x.f.map(z=>z.id===f.id?{...z,v:e.target.value}:z)}))} aria-label="Value"/>${isTel(f.v)&&h`<a class="btn" href=${'tel:'+f.v.replace(/[^\d+]/g,'')} aria-label="Call">${Ic('phone',15)}</a>`}</div></div>`)}
+  <button class="btn mt-3 text-sm" onClick=${()=>setCard(k.id,x=>({...x,f:[...x.f,{id:uid(),l:'New field',v:''}]}))}>${Ic('plus',15)}Add Emergency Field</button></div>`)}</div></div>`;
+}
+
+const mk=(n,a)=>({id:uid(),n,it:a.map(t=>({id:uid(),t,d:false}))});
+function PackOld(){
+  const[l,setL]=useLS('fo-pack',[mk('Schwimmbad-Ausflug',['Badesachen','Handtücher','Schwimmflügel','Sonnencreme','Wechselkleidung','Snacks']),mk('Wochenende bei Oma',['Schlafanzüge','Kuscheltiere','Zahnbürsten','Medikamente','Wechselkleidung','Lieblingsbuch']),mk('Großer Sommerurlaub',['Pässe / Ausweise','Reiseapotheke','Ladekabel','Sonnenhüte','Badesachen','Spielzeug fürs Auto'])]);
+  const up=(id,fn)=>setL(a=>a.map(x=>x.id===id?fn(x):x));
+  return h`<div><section class="card p-5 mb-5"><${Head} ic="suit" t="Die Vergiss-nichts-Checklisten" sub="Reusable lists: tick off, then reset for the next trip" col="#14B8A6"/><${Add} ph="New list, e.g. Kita-Ausflug" on=${n=>setL(a=>[...a,mk(n,[])])}/></section>
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">${l.map(k=>{const dn=k.it.filter(x=>x.d).length;return h`<div key=${k.id} class="card p-4"><div class="flex items-center gap-2"><input class="inp ghost font-extrabold flex-1" value=${k.n} onInput=${e=>up(k.id,x=>({...x,n:e.target.value}))} aria-label="List name"/><${Del} on=${()=>del(setL,k.id)}/></div>
+  <div class="flex items-center gap-2 my-2"><div class="h-2 rounded-full flex-1" style=${{background:'var(--line)'}}><div class="h-2 rounded-full" style=${{width:(k.it.length?dn/k.it.length*100:0)+'%',background:'#14B8A6',transition:'width .3s'}}/></div><span class="text-xs mute">${dn}/${k.it.length}</span><button class="chip flex items-center gap-1" onClick=${()=>up(k.id,x=>({...x,it:x.it.map(z=>({...z,d:false}))}))}>${Ic('refresh',13)}Reset</button></div>
+  ${k.it.map(x=>h`<div key=${x.id} class="flex items-center gap-2 py-1"><${CK} d=${x.d} on=${()=>up(k.id,y=>({...y,it:y.it.map(z=>z.id===x.id?{...z,d:!z.d}:z)}))}/><input class="inp ghost flex-1" style=${{textDecoration:x.d?'line-through':'none',opacity:x.d?.5:1}} value=${x.t} onInput=${e=>up(k.id,y=>({...y,it:y.it.map(z=>z.id===x.id?{...z,t:e.target.value}:z)}))} aria-label="Item"/><${Del} on=${()=>up(k.id,y=>({...y,it:y.it.filter(z=>z.id!==x.id)}))}/></div>`)}
+  <${Add} ph="Add item" on=${t=>up(k.id,y=>({...y,it:[...y.it,{id:uid(),t,d:false}]}))}/></div>`})}</div></div>`;
+}
+
+const eu=n=>n.toFixed(2).replace('.',',')+' €';
+const dt=s=>s?new Date(...parts(s).map((v,i)=>i===1?v-1:v)).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):'';
+const sum=a=>a.reduce((s,x)=>s+num(x.a),0);
+function Finance(){
+  const[ex,setEx]=useLS('fo-mem',['Joint account','Nana']);
+  const[D,setD]=useLS('fo-debts',[{id:uid(),f:'Nana',t:'Joint account',items:[{id:uid(),n:'Groceries',s:'Kaufland',d:addDays(-6),a:'42,80'},{id:uid(),n:'Heating share',s:'',d:addDays(-3),a:'50'}],pays:[{id:uid(),a:'30',m:'Cash',d:addDays(-1)}]},{id:uid(),f:'partner',t:'Joint account',items:[],pays:[]}]);
+  const[F,setF]=useLS('fo-funds2',[{id:uid(),n:'Vacation Fund 2027',g:'3000',c:[{id:uid(),w:'me',a:'300',d:addDays(-20)},{id:uid(),w:'partner',a:'550',d:addDays(-10)}]},{id:uid(),n:'Kids’ renovations',g:'1200',c:[{id:uid(),w:'Nana',a:'200',d:addDays(-5)}]}]);
+  const mem=[...P.map(p=>p.id),...ex];
+  const open=d=>sum(d.items)-sum(d.pays);
+  const bal={};D.forEach(d=>{const o=open(d);bal[d.t]=(bal[d.t]||0)+o;bal[d.f]=(bal[d.f]||0)-o});
+  const up=(id,fn)=>setD(a=>a.map(x=>x.id===id?fn(x):x));
+  const li=(id,k,r,p)=>up(id,x=>({...x,[k]:x[k].map(z=>z.id===r?{...z,...p}:z)}));
+  const rm=(id,k,r)=>up(id,x=>({...x,[k]:x[k].filter(z=>z.id!==r)}));
+  const ad=(id,k,row)=>up(id,x=>({...x,[k]:[...x[k],{id:uid(),...row}]}));
+  const fu=(id,fn)=>setF(a=>a.map(x=>x.id===id?fn(x):x));
+  const dI=(v,on,w)=>h`<input type="date" class="inp" style=${{width:w||138}} value=${v} onChange=${e=>on(e.target.value)}/>`;
+  const tI=(v,on,ph,fl)=>h`<input class="inp" style=${{flex:fl}} placeholder=${ph} value=${v} onInput=${e=>on(e.target.value)} aria-label=${ph}/>`;
+  const aI=(v,on)=>h`<input class="inp" style=${{width:84}} inputmode="decimal" placeholder="€" value=${v} onInput=${e=>on(e.target.value)} aria-label="Amount"/>`;
+  return h`<div class="grid lg:grid-cols-5 gap-5"><section class="card p-5 lg:col-span-3"><${Head} ic="coin" t="Who owes whom" sub="Add items and payments, the total is calculated" col="#3D8FD1"/>
+  <div class="flex flex-wrap gap-2 mb-4">${Object.keys(bal).length===0&&h`<span class="text-sm mute">Nothing yet.</span>`}${Object.entries(bal).map(([k,v])=>h`<span key=${k} class="chip" style=${{borderColor:v>=0?'#5BAA6B':'#E0566B',color:v>=0?'#3E8E50':'#E0566B'}}>${lab(k)}: ${Math.abs(v)<.005?'settled':(v>0?'gets ':'owes ')+eu(Math.abs(v))}</span>`)}</div>
+  ${D.map(d=>{const o=open(d);return h`<div key=${d.id} class="rounded-2xl p-3 mb-4" style=${{background:'var(--bg)'}}>
+  <div class="flex flex-wrap items-center gap-2 mb-3"><${Sel} v=${d.f} o=${mem} on=${v=>up(d.id,x=>({...x,f:v}))}/><b class="mute">owes</b><${Sel} v=${d.t} o=${mem} on=${v=>up(d.id,x=>({...x,t:v}))}/><span class="flex-1"/><${Del} on=${()=>del(setD,d.id)}/></div>
+  <p class="text-sm font-bold mb-1.5">Items</p>
+  ${d.items.map(r=>h`<div key=${r.id} class="flex flex-wrap items-center gap-1.5 mb-1.5">${dI(r.d,v=>li(d.id,'items',r.id,{d:v}))}${tI(r.n,v=>li(d.id,'items',r.id,{n:v}),'What','2 1 110px')}${tI(r.s,v=>li(d.id,'items',r.id,{s:v}),'Store, e.g. Kaufland','1 1 100px')}${aI(r.a,v=>li(d.id,'items',r.id,{a:v}))}<${Del} on=${()=>rm(d.id,'items',r.id)}/></div>`)}
+  <div class="flex items-center justify-between"><button class="chip flex items-center gap-1" onClick=${()=>ad(d.id,'items',{n:'',s:'',d:TODAY,a:''})}>${Ic('plus',13)}Add item</button><span class="text-sm">Total <b>${eu(sum(d.items))}</b></span></div>
+  <p class="text-sm font-bold mt-4 mb-1.5">Paid back</p>
+  ${d.pays.map(r=>h`<div key=${r.id} class="flex flex-wrap items-center gap-1.5 mb-1.5">${dI(r.d,v=>li(d.id,'pays',r.id,{d:v}))}${tI(r.m,v=>li(d.id,'pays',r.id,{m:v}),'How, e.g. cash, PayPal','1 1 140px')}${aI(r.a,v=>li(d.id,'pays',r.id,{a:v}))}<${Del} on=${()=>rm(d.id,'pays',r.id)}/></div>`)}
+  <div class="flex items-center justify-between"><button class="chip flex items-center gap-1" onClick=${()=>ad(d.id,'pays',{m:'',d:TODAY,a:''})}>${Ic('plus',13)}Add payment</button><span class="text-sm">Paid <b>${eu(sum(d.pays))}</b></span></div>
+  <div class="mt-3 pt-3 flex justify-between items-center" style=${{borderTop:'1px solid var(--line)'}}><span class="font-bold">${Math.abs(o)<.005?'Settled':'Still open'}</span><span class="text-xl font-extrabold" style=${{color:Math.abs(o)<.005?'#3E8E50':'#E0566B'}}>${eu(o)}</span></div></div>`})}
+  <button class="btn" onClick=${()=>setD(a=>[...a,{id:uid(),f:'partner',t:'Joint account',items:[],pays:[]}])}>${Ic('plus',16)}New debt list</button>
+  <p class="text-xs mute mt-4">Need another person or account (Opa, Savings)?</p><${Add} ph="New member or account" on=${n=>setEx(a=>[...a,n])}/></section>
+  <section class="card p-5 lg:col-span-2"><${Head} ic="coin" t="Funds" sub="Who paid in how much" col="#5BAA6B"/>
+  ${F.map(f=>{const tot=sum(f.c);const pr=num(f.g)?Math.min(100,tot/num(f.g)*100):0;const by={};f.c.forEach(c=>{by[c.w]=(by[c.w]||0)+num(c.a)});return h`<div key=${f.id} class="rounded-2xl p-3 mb-3" style=${{background:'var(--bg)'}}><div class="flex items-center gap-2"><input class="inp ghost font-extrabold flex-1" value=${f.n} onInput=${e=>fu(f.id,x=>({...x,n:e.target.value}))} aria-label="Fund name"/><${Del} on=${()=>del(setF,f.id)}/></div>
+  <div class="flex items-center gap-2 my-2 text-sm"><span class="mute">Goal €</span><input class="inp" style=${{width:100}} inputmode="decimal" value=${f.g} onInput=${e=>fu(f.id,x=>({...x,g:e.target.value}))}/><span class="flex-1 text-right"><b>${eu(tot)}</b> saved</span></div>
+  <div class="h-2 rounded-full" style=${{background:'var(--line)'}}><div class="h-2 rounded-full" style=${{width:pr+'%',background:'#5BAA6B',transition:'width .3s'}}/></div>
+  <div class="flex flex-wrap gap-1.5 my-3">${Object.keys(by).length===0&&h`<span class="text-xs mute">No deposits yet.</span>`}${Object.entries(by).map(([k,v])=>h`<span key=${k} class="chip">${lab(k)}: ${eu(v)}</span>`)}</div>
+  ${f.c.map(r=>h`<div key=${r.id} class="flex flex-wrap items-center gap-1.5 mb-1.5"><${Sel} v=${r.w} o=${mem} on=${v=>fu(f.id,x=>({...x,c:x.c.map(z=>z.id===r.id?{...z,w:v}:z)}))}/>${dI(r.d,v=>fu(f.id,x=>({...x,c:x.c.map(z=>z.id===r.id?{...z,d:v}:z)})),130)}${aI(r.a,v=>fu(f.id,x=>({...x,c:x.c.map(z=>z.id===r.id?{...z,a:v}:z)})))}<${Del} on=${()=>fu(f.id,x=>({...x,c:x.c.filter(z=>z.id!==r.id)}))}/></div>`)}
+  <button class="chip flex items-center gap-1" onClick=${()=>fu(f.id,x=>({...x,c:[...x.c,{id:uid(),w:'me',a:'',d:TODAY}]}))}>${Ic('plus',13)}Add deposit</button></div>`})}
+  <${Add} ph="New fund, e.g. Sommerurlaub 2027" on=${n=>setF(a=>[...a,{id:uid(),n,g:'',c:[]}])}/></section></div>`;
+}
+
+const mkc=(n,a=[])=>({id:uid(),n,it:a.map(t=>({id:uid(),t,d:false}))});
+const mkg=(n,cs)=>({id:uid(),n,o:true,c:cs.map(([k,a])=>mkc(k,a))});
+function Pack(){
+  const[l,setL]=useLS('fo-pack2',[{id:uid(),n:'Großer Sommerurlaub',g:[...P.map(p=>mkg(p.n,[['Klamotten',['Unterwäsche','T-Shirts','Badesachen']],['Hygiene',['Zahnbürste','Sonnencreme']],...(p.id[0]==='c'?[['Spielzeug',['Kuscheltier']]]:[])])),mkg('Alle',[['Dokumente',['Pässe / Ausweise','Reiseapotheke']]])]},{id:uid(),n:'Schwimmbad-Ausflug',g:[mkg('Alle',[['Basics',['Badesachen','Handtücher','Sonnencreme','Snacks']]])]},{id:uid(),n:'Wochenende bei Oma',g:[mkg('Alle',[['Basics',['Schlafanzüge','Zahnbürsten','Medikamente']],['Kinder',['Kuscheltiere','Lieblingsbuch']]])]}]);
+  const up=(id,fn)=>setL(a=>a.map(x=>x.id===id?fn(x):x));
+  const mg=(L,G,fn)=>up(L,x=>({...x,g:x.g.map(g=>g.id===G?fn(g):g)}));
+  const mc=(L,G,C,fn)=>mg(L,G,g=>({...g,c:g.c.map(c=>c.id===C?fn(c):c)}));
+  const mi=(L,G,C,I,p)=>mc(L,G,C,c=>({...c,it:c.it.map(i=>i.id===I?{...i,...p}:i)}));
+  const all=x=>x.g.flatMap(g=>g.c.flatMap(c=>c.it));
+  return h`<div class="max-w-3xl mx-auto"><section class="card p-5 mb-5"><${Head} ic="suit" t="Die Vergiss-nichts-Checklisten" sub="List, then person, then category, then items" col="#14B8A6"/><${Add} ph="New list, e.g. Skiurlaub" on=${n=>setL(a=>[...a,{id:uid(),n,g:[]}])}/></section>
+  ${l.map(x=>{const it=all(x);const dn=it.filter(i=>i.d).length;return h`<section key=${x.id} class="card p-5 mb-5"><div class="flex items-center gap-2"><input class="inp ghost text-xl font-extrabold flex-1" value=${x.n} onInput=${e=>up(x.id,y=>({...y,n:e.target.value}))} aria-label="List name"/><${Del} on=${()=>del(setL,x.id)}/></div>
+  <div class="flex items-center gap-2 my-2"><div class="h-2 rounded-full flex-1" style=${{background:'var(--line)'}}><div class="h-2 rounded-full" style=${{width:(it.length?dn/it.length*100:0)+'%',background:'#14B8A6',transition:'width .3s'}}/></div><span class="text-xs mute">${dn}/${it.length}</span><button class="chip flex items-center gap-1" onClick=${()=>up(x.id,y=>({...y,g:y.g.map(g=>({...g,c:g.c.map(c=>({...c,it:c.it.map(i=>({...i,d:false}))}))}))}))}>${Ic('refresh',13)}Reset all</button></div>
+  ${x.g.map(g=>h`<div key=${g.id} class="rounded-2xl p-3 mb-3" style=${{background:'var(--bg)'}}><div class="flex items-center gap-2"><button aria-label="Expand" onClick=${()=>mg(x.id,g.id,y=>({...y,o:!y.o}))} style=${{transform:g.o?'rotate(90deg)':'none',transition:'transform .2s'}}>${Ic('right')}</button><input class="inp ghost font-extrabold flex-1" value=${g.n} onInput=${e=>mg(x.id,g.id,y=>({...y,n:e.target.value}))} aria-label="Person or group"/><${Del} on=${()=>up(x.id,y=>({...y,g:y.g.filter(z=>z.id!==g.id)}))}/></div>
+  ${g.o&&h`<div class="mt-2">${g.c.map(c=>h`<div key=${c.id} class="rounded-xl p-2 mb-2" style=${{background:'var(--card)'}}><div class="flex items-center gap-2"><input class="inp ghost font-bold flex-1" value=${c.n} onInput=${e=>mc(x.id,g.id,c.id,y=>({...y,n:e.target.value}))} aria-label="Category"/><span class="text-xs mute">${c.it.filter(i=>i.d).length}/${c.it.length}</span><${Del} on=${()=>mg(x.id,g.id,y=>({...y,c:y.c.filter(z=>z.id!==c.id)}))}/></div>
+  ${c.it.map(i=>h`<div key=${i.id} class="flex items-center gap-2 py-1"><${CK} d=${i.d} c="#14B8A6" on=${()=>mi(x.id,g.id,c.id,i.id,{d:!i.d})}/><input class="inp ghost flex-1" style=${{textDecoration:i.d?'line-through':'none',opacity:i.d?.5:1}} value=${i.t} onInput=${e=>mi(x.id,g.id,c.id,i.id,{t:e.target.value})} aria-label="Item"/><${Del} on=${()=>mc(x.id,g.id,c.id,y=>({...y,it:y.it.filter(z=>z.id!==i.id)}))}/></div>`)}
+  <${Add} ph="Add item" on=${t=>mc(x.id,g.id,c.id,y=>({...y,it:[...y.it,{id:uid(),t,d:false}]}))}/></div>`)}
+  <${Add} ph="New category, e.g. Klamotten" on=${n=>mg(x.id,g.id,y=>({...y,c:[...y.c,mkc(n)]}))}/></div>`}</div>`)}
+  <div class="flex flex-wrap gap-2 mb-1">${P.filter(p=>!x.g.some(g=>g.n===p.n)).map(p=>h`<button key=${p.id} class="chip flex items-center gap-1.5" onClick=${()=>up(x.id,y=>({...y,g:[...y.g,mkg(p.n,[])]}))}><${Dot} id=${p.id} s=${8}/>+ ${p.n}</button>`)}</div>
+  <${Add} ph="New group, e.g. Alle or Handgepäck" on=${n=>up(x.id,y=>({...y,g:[...y.g,mkg(n,[])]}))}/></section>`})}</div>`;
+}
+
+function App(){
+  const[tab,setTab]=useState('hub');const[open,setOpen]=useState(false);const[people,setPeople]=useLS('fo-people',P.map(p=>({...p})));P.splice(0,P.length,...people);const setP=(id,patch)=>setPeople(a=>a.map(x=>x.id===id?{...x,...patch}:x));const[gro,setGro]=useLS('fo-gro',[{id:uid(),t:'Oat milk x2',done:false},{id:uid(),t:'Bananas',done:false},{id:uid(),t:'Pasta',done:true}]);const SW=['#E0566B','#3D8FD1','#E9A21B','#5BAA6B','#8A5FBF','#14B8A6','#F97316','#64748B'];
+  const[rem,setRem]=useLS('fo-rem',[]);const[ro,setRo]=useState(false);const[now,setNow]=useState(Date.now());const[rt,setRt]=useState('');const[rd,setRd]=useState(TODAY);const[rtm,setRtm]=useState('');
+  const[bdToday,setBdToday]=useState(()=>{try{return((sb?store['fo-bd']:JSON.parse(localStorage.getItem('fo-bd')))||[]).filter(b=>daysTo(b.d)===0)}catch(e){return[]}});
+  useEffect(()=>{const i=setInterval(()=>setNow(Date.now()),30000);return()=>clearInterval(i)},[]);
+  const nd=new Date(now);const hm=pad(nd.getHours())+':'+pad(nd.getMinutes());const tdy=iso(nd);
+  const due=rem.filter(r=>!r.done&&(r.d<tdy||(r.d===tdy&&(!r.tm||r.tm<=hm))));
+  useEffect(()=>{const fresh=due.filter(r=>!r.n);if(!fresh.length)return;try{if(window.Notification&&Notification.permission==='granted')fresh.forEach(r=>new Notification('Reminder',{body:r.t}))}catch(e){}setRem(a=>a.map(r=>fresh.some(f=>f.id===r.id)?{...r,n:true}:r))},[now,rem.length]);
+  const addRem=()=>{if(!rt.trim())return;setRem(a=>[...a,{id:uid(),t:rt.trim(),d:rd||TODAY,tm:rtm,done:false,n:false}]);setRt('');setRtm('')};
+  const tabs=[['hub','home','Alltag','Daily hub'],['kids','cake','Geburtstage & Einladungen','Kids & birthdays'],['gift','gift','Wunschlisten','Gift ideas'],['meal','cart','Essensplaner','Meals & groceries'],['fin','coin','Finanzplaner','Family ledger'],['sos','shield','Notfall-Ordner','Emergency folder'],['pack','suit','Packlisten','Checklists']];
+  return h`<div class="max-w-6xl mx-auto px-4 pb-10">
+  <header class="pt-6 pb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 class="text-4xl font-extrabold tracking-tight" style=${{color:'var(--brand)'}}>Zuhause</h1><p class="mute">${NOW.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</p></div><div class="flex gap-3">${P.map(p=>h`<span key=${p.id} class="flex items-center gap-1.5 text-sm font-semibold"><${Dot} id=${p.id}/>${p.n}</span>`)}<button class="chip flex items-center gap-1.5" onClick=${()=>setOpen(!open)}>${Ic('edit',14)}Names & colors</button><button class="chip flex items-center gap-1.5" onClick=${()=>setRo(!ro)}>${Ic('bell',14)}Reminders${due.length>0?' ('+due.length+')':''}</button></div></header>
+  ${bdToday.length>0&&h`<div role="dialog" aria-modal="true" style=${{position:'fixed',inset:0,zIndex:50,background:'rgba(0,0,0,.5)',display:'grid',placeItems:'center',padding:16}}><div class="card p-6 text-center" style=${{maxWidth:380,width:'100%',border:'2px solid #E9A21B'}}><div style=${{fontSize:52}}>🎉</div><h2 class="text-2xl font-extrabold mb-2">Birthday today!</h2>${bdToday.map(b=>{const a=T0.getFullYear()-parts(b.d)[0];return h`<p key=${b.id} class="text-lg font-semibold">Today is ${b.n}’s birthday${a>0&&a<120?' (turns '+a+')':''}</p>`})}<p class="text-sm mute mt-2">Time to call or send a message.</p><button class="btn mt-4" onClick=${()=>setBdToday([])}>Got it</button></div></div>`}
+  ${ro&&h`<div class="card p-4 mb-4"><p class="font-bold mb-3">Reminders</p><div class="flex flex-wrap gap-2"><input class="inp" style=${{flex:'1 1 160px'}} placeholder="Remind me to..." value=${rt} onInput=${e=>setRt(e.target.value)} onKeyDown=${enter(addRem)}/><input type="date" class="inp" style=${{width:150}} value=${rd} onChange=${e=>setRd(e.target.value)}/><input type="time" class="inp" style=${{width:108}} aria-label="Time (optional)" value=${rtm} onChange=${e=>setRtm(e.target.value)}/><button class="btn" onClick=${addRem}>${Ic('plus',16)}Add</button></div>
+  <div class="mt-3">${rem.length===0&&h`<p class="text-sm mute">No reminders yet.</p>`}${[...rem].sort((a,b)=>(a.d+(a.tm||'')).localeCompare(b.d+(b.tm||''))).map(r=>h`<div key=${r.id} class="flex items-center gap-2 py-1"><${CK} d=${r.done} on=${()=>upd(setRem,r.id,{done:!r.done})}/><span class="flex-1" style=${{textDecoration:r.done?'line-through':'none',opacity:r.done?.5:1}}>${r.t}</span><span class="text-xs mute">${dt(r.d)}${r.tm?' '+r.tm:''}</span><${Del} on=${()=>del(setRem,r.id)}/></div>`)}</div>
+  <p class="text-xs mute mt-3">Due reminders show up at the top of the screen. Browser notifications only work while this page is open.</p><button class="chip mt-2" onClick=${()=>{try{Notification.requestPermission()}catch(e){}}}>Allow browser notifications</button></div>`}
+  ${due.length>0&&h`<div class="card p-4 mb-4" style=${{border:'2px solid #E9A21B'}}><b class="flex items-center gap-2 mb-2">${Ic('bell',16)}Due now</b>${due.map(r=>h`<div key=${r.id} class="flex items-center gap-2 py-1"><${CK} d=${false} on=${()=>upd(setRem,r.id,{done:true})}/><span class="flex-1 font-semibold">${r.t}</span><span class="text-xs mute">${r.tm||dt(r.d)}</span></div>`)}</div>`}${open&&h`<div class="card p-4 mb-4"><p class="font-bold mb-3">Who is in the family?</p>${people.map(p=>h`<div key=${p.id} class="flex flex-wrap items-center gap-2 mb-3"><input type="color" aria-label="Custom color" value=${p.c} onInput=${e=>setP(p.id,{c:e.target.value})} style=${{width:40,height:36,border:0,background:'none',padding:0}}/><input class="inp" style=${{flex:'1 1 140px'}} value=${p.n} onInput=${e=>setP(p.id,{n:e.target.value})} aria-label="Name"/><div class="flex gap-1.5">${SW.map(c=>h`<button key=${c} aria-label=${c} onClick=${()=>setP(p.id,{c})} style=${{background:c,width:22,height:22,borderRadius:99,outline:p.c.toLowerCase()===c.toLowerCase()?'2px solid var(--ink)':'none',outlineOffset:2}}/>`)}</div></div>`)}<p class="text-xs mute">Changes apply everywhere right away: calendar, chores and legend.</p></div>`}
+  <nav class="flex gap-2 mb-5 sticky z-10 py-2 scroll" style=${{top:'env(safe-area-inset-top,0px)',background:'var(--bg)'}}>${tabs.map(([id,ic,l,s])=>h`<button key=${id} onClick=${()=>setTab(id)} class="flex-none rounded-2xl px-4 py-3 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 text-center" style=${tab===id?{background:'var(--brand)',color:'#fff'}:{background:'var(--card)',border:'1px solid var(--line)'}}>${Ic(ic,22)}<span class="leading-tight"><b class="block text-sm sm:text-base">${l}</b><span class="hidden sm:block text-xs opacity-75">${s}</span></span></button>`)}</nav>
+  ${tab==='hub'&&h`<div class="grid lg:grid-cols-5 gap-5"><div class="lg:col-span-3"><${Cal}/></div><div class="lg:col-span-2 space-y-5"><${Grocery} g=${gro} setG=${setGro}/><${Chores}/></div></div>`}
+  ${tab==='kids'&&h`<div class="max-w-3xl mx-auto"><${Birthdays}/></div>`}
+  ${tab==='gift'&&h`<${Wishes}/>`}
+  ${tab==='meal'&&h`<${Meals} gro=${gro} setGro=${setGro}/>`}${tab==='fin'&&h`<${Finance}/>`}${tab==='sos'&&h`<${Sos}/>`}${tab==='pack'&&h`<${Pack}/>`}</div>`;
+}
+function Boot(){
+  const[st,setSt]=useState(sb?'load':'ready');const[em,setEm]=useState('');const[pw,setPw]=useState('');const[err,setErr]=useState('');
+  const load=async()=>{
+    const{data,error}=await sb.from('family_data').select('key,value');
+    if(error){setErr(error.message);setSt('login');return}
+    data.forEach(r=>{store[r.key]=r.value});
+    const pr=await sb.from('private_data').select('key,value');(pr.data||[]).forEach(r=>{store['priv:'+r.key]=r.value});
+    sb.channel('fd').on('postgres_changes',{event:'*',schema:'public',table:'family_data'},p=>{const r=p.new;if(r&&r.key&&JSON.stringify(store[r.key])!==JSON.stringify(r.value)){store[r.key]=r.value;emit(r.key)}}).on('postgres_changes',{event:'*',schema:'public',table:'private_data'},p=>{const r=p.new;const k='priv:'+(r&&r.key);if(r&&r.key&&JSON.stringify(store[k])!==JSON.stringify(r.value)){store[k]=r.value;emit(k)}}).subscribe();
+    setSt('ready')};
+  useEffect(()=>{if(!sb)return;sb.auth.getSession().then(({data})=>data.session?load():setSt('login'))},[]);
+  const login=async()=>{setErr('');const{error}=await sb.auth.signInWithPassword({email:em.trim(),password:pw});if(error)setErr('Anmeldung fehlgeschlagen: '+error.message);else{setSt('load');load()}};
+  if(st==='ready')return h`<${App}/>`;
+  if(st==='load')return h`<p class="p-8 mute">Lade Familiendaten...</p>`;
+  return h`<div class="min-h-screen grid place-items-center p-4"><div class="card p-6 w-full" style=${{maxWidth:380}}><h1 class="text-3xl font-extrabold mb-1" style=${{color:'var(--brand)'}}>Zuhause</h1><p class="mute mb-4">Bitte anmelden (gleiches Login für die ganze Familie).</p><input class="inp mb-2" type="email" placeholder="E-Mail" value=${em} onInput=${e=>setEm(e.target.value)}/><input class="inp mb-3" type="password" placeholder="Passwort" value=${pw} onInput=${e=>setPw(e.target.value)} onKeyDown=${enter(login)}/>${err&&h`<p class="text-sm mb-3" style=${{color:'#E0566B'}}>${err}</p>`}<button class="btn w-full justify-center" onClick=${login}>Anmelden</button></div></div>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(h`<${Boot}/>`);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
