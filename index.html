@@ -21,6 +21,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141B18;--card:#1E2824;--ink:#E8EFEA;--mute:#9BAAA2;--line:#2C3A34;--brand:#5FB89C;--soft:#25362F;color-scheme:dark}}
 :root[data-theme="dark"]{--bg:#141B18;--card:#1E2824;--ink:#E8EFEA;--mute:#9BAAA2;--line:#2C3A34;--brand:#5FB89C;--soft:#25362F;color-scheme:dark}
 *,*:before,*:after{box-sizing:inherit}
+html,body{max-width:100%}body{overflow-x:clip}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',sans-serif}
 .card{background:var(--card);border:1px solid var(--line);border-radius:22px}
@@ -53,7 +54,7 @@ const SB_URL='https://wxljqaeqgqryvqeuqboa.supabase.co',SB_KEY='sb_publishable__
 const sb=(SB_URL&&SB_KEY&&window.supabase)?window.supabase.createClient(SB_URL,SB_KEY):null;
 const store={},subs={},timers={},LOCAL=['fo-priv'];
 const emit=k=>(subs[k]||[]).forEach(f=>f(store[k]));
-const save=k=>{clearTimeout(timers[k]);timers[k]=setTimeout(()=>{sb.from('family_data').upsert({key:k,value:store[k],updated_at:new Date().toISOString()}).then(r=>{if(r.error)console.error(r.error)})},400)};
+const save=k=>{clearTimeout(timers[k]);timers[k]=setTimeout(()=>{const pv=k.startsWith('priv:');sb.from(pv?'private_data':'family_data').upsert({key:pv?k.slice(5):k,value:store[k],updated_at:new Date().toISOString()},pv?{onConflict:'owner,key'}:{}).then(r=>{if(r.error)console.error(r.error)})},400)};
 function useLS(k,init){
   const loc=!sb||LOCAL.includes(k);
   const[v,setV]=useState(()=>{if(loc){try{const r=localStorage.getItem(k);return r?JSON.parse(r):init}catch(e){return init}}return k in store?store[k]:init});
@@ -151,7 +152,7 @@ function Toys(){
 }
 
 function Wishes(){
-  const[w,setW]=useLS('fo-wish',[{id:uid(),who:'Partner',idea:'Running headphones',price:'89',link:'Sport store',secret:true,got:false},{id:uid(),who:'Child 1',idea:'Wooden marble run',price:'35',link:'toys.example/marble-run',secret:false,got:false},{id:uid(),who:'Oma Hannelore',idea:'Framed family photo',price:'25',link:'Photo studio',secret:false,got:false}]);
+  const[wS,setWS]=useLS('fo-wish',[]);const[wP,setWP]=useLS('priv:fo-wish-priv',[]);const w=[...wP,...wS];const setW=fn=>{const n=typeof fn==='function'?fn(w):fn;setWP(n.filter(x=>x.secret));setWS(n.filter(x=>!x.secret))};useEffect(()=>{const sec=wS.filter(x=>x.secret);if(sec.length){setWP(a=>[...sec,...a]);setWS(a=>a.filter(x=>!x.secret))}},[]);
   const[privacy,setPrivacy]=useLS('fo-priv',false);const[fl,setFl]=useState('all');
   const[F,setF]=useState({who:'',idea:'',price:'',link:'',secret:false});
   const add=()=>{if(!F.who.trim()||!F.idea.trim())return;setW(a=>[{id:uid(),...F,got:false},...a]);setF({...F,idea:'',price:'',link:'',secret:false})};
@@ -161,7 +162,7 @@ function Wishes(){
   return h`<div class="max-w-3xl mx-auto"><section class="card p-5"><${Head} ic="gift" t="Wunschlisten übers Jahr" sub="Jot ideas down the moment someone mentions them" col="#E0566B"/>
   <div class="grid grid-cols-1 sm:grid-cols-2 gap-2"><input class="inp" list="names" placeholder="Name (who is it for?)" value=${F.who} onInput=${e=>set('who',e.target.value)}/><datalist id="names">${[...P.map(p=>p.n),...names].map(x=>h`<option key=${x} value=${x}/>`)}</datalist>
   <input class="inp" placeholder="Gift idea" value=${F.idea} onInput=${e=>set('idea',e.target.value)} onKeyDown=${enter(add)}/><input class="inp" inputmode="decimal" placeholder="Estimated price (€)" value=${F.price} onInput=${e=>set('price',e.target.value)}/><input class="inp" placeholder="Link / store" value=${F.link} onInput=${e=>set('link',e.target.value)} onKeyDown=${enter(add)}/></div>
-  <div class="flex items-center justify-between mt-3"><label class="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked=${F.secret} onChange=${e=>set('secret',e.target.checked)}/>${Ic('lock',15)}Secret mode</label><button class="btn" onClick=${add}>${Ic('plus',16)}Save idea</button></div></section>
+  <div class="flex items-center justify-between mt-3"><label class="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked=${F.secret} onChange=${e=>set('secret',e.target.checked)}/>${Ic('lock',15)}Secret: only visible to me</label><button class="btn" onClick=${add}>${Ic('plus',16)}Save idea</button></div></section>
   <div class="flex flex-wrap items-center gap-2 my-4"><button class="chip" style=${fl==='all'?{background:'var(--brand)',color:'#fff'}:{}} onClick=${()=>setFl('all')}>All</button>${names.map(x=>h`<button key=${x} class="chip" style=${fl===x?{background:'var(--brand)',color:'#fff'}:{}} onClick=${()=>setFl(x)}>${x}</button>`)}
   <button class="chip flex items-center gap-1.5 ml-auto" onClick=${()=>setPrivacy(!privacy)} style=${privacy?{background:'#E0566B',color:'#fff',borderColor:'#E0566B'}:{}}>${Ic(privacy?'eyeoff':'eye',14)}${privacy?'Secret ideas hidden':'Hide secrets (shared screen)'}</button></div>
   <p class="text-sm mute mb-3">Open ideas total: <b style=${{color:'var(--ink)'}}>${tot.toFixed(2).replace('.',',')} €</b></p>
@@ -326,7 +327,7 @@ function App(){
   const addRem=()=>{if(!rt.trim())return;setRem(a=>[...a,{id:uid(),t:rt.trim(),d:rd||TODAY,tm:rtm,done:false,n:false}]);setRt('');setRtm('')};
   const tabs=[['hub','home','Alltag','Daily hub'],['kids','cake','Geburtstage & Einladungen','Kids & birthdays'],['gift','gift','Wunschlisten','Gift ideas'],['meal','cart','Essensplaner','Meals & groceries'],['fin','coin','Finanzplaner','Family ledger'],['sos','shield','Notfall-Ordner','Emergency folder'],['pack','suit','Packlisten','Checklists']];
   return h`<div class="max-w-6xl mx-auto px-4 pb-10">
-  <header class="pt-6 pb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 class="text-4xl font-extrabold tracking-tight" style=${{color:'var(--brand)'}}>Zuhause</h1><p class="mute">${NOW.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</p></div><div class="flex gap-3">${P.map(p=>h`<span key=${p.id} class="flex items-center gap-1.5 text-sm font-semibold"><${Dot} id=${p.id}/>${p.n}</span>`)}<button class="chip flex items-center gap-1.5" onClick=${()=>setOpen(!open)}>${Ic('edit',14)}Names & colors</button><button class="chip flex items-center gap-1.5" onClick=${()=>setRo(!ro)}>${Ic('bell',14)}Reminders${due.length>0?' ('+due.length+')':''}</button></div></header>
+  <header class="pt-6 pb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 class="text-4xl font-extrabold tracking-tight" style=${{color:'var(--brand)'}}>Zuhause</h1><p class="mute">${NOW.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</p></div><div class="flex flex-wrap gap-x-3 gap-y-1">${P.map(p=>h`<span key=${p.id} class="flex items-center gap-1.5 text-sm font-semibold"><${Dot} id=${p.id}/>${p.n}</span>`)}</div><div class="flex flex-wrap gap-2 w-full"><button class="chip flex items-center gap-1.5" onClick=${()=>setOpen(!open)}>${Ic('edit',14)}Names & colors</button><button class="chip flex items-center gap-1.5" onClick=${()=>setRo(!ro)}>${Ic('bell',14)}Reminders${due.length>0?' ('+due.length+')':''}</button>${sb&&h`<button class="chip" onClick=${async()=>{await sb.auth.signOut();location.reload()}}>Abmelden</button>`}</div></header>
   ${bdToday.length>0&&h`<div role="dialog" aria-modal="true" style=${{position:'fixed',inset:0,zIndex:50,background:'rgba(0,0,0,.5)',display:'grid',placeItems:'center',padding:16}}><div class="card p-6 text-center" style=${{maxWidth:380,width:'100%',border:'2px solid #E9A21B'}}><div style=${{fontSize:52}}>🎉</div><h2 class="text-2xl font-extrabold mb-2">Birthday today!</h2>${bdToday.map(b=>{const a=T0.getFullYear()-parts(b.d)[0];return h`<p key=${b.id} class="text-lg font-semibold">Today is ${b.n}’s birthday${a>0&&a<120?' (turns '+a+')':''}</p>`})}<p class="text-sm mute mt-2">Time to call or send a message.</p><button class="btn mt-4" onClick=${()=>setBdToday([])}>Got it</button></div></div>`}
   ${ro&&h`<div class="card p-4 mb-4"><p class="font-bold mb-3">Reminders</p><div class="flex flex-wrap gap-2"><input class="inp" style=${{flex:'1 1 160px'}} placeholder="Remind me to..." value=${rt} onInput=${e=>setRt(e.target.value)} onKeyDown=${enter(addRem)}/><input type="date" class="inp" style=${{width:150}} value=${rd} onChange=${e=>setRd(e.target.value)}/><input type="time" class="inp" style=${{width:108}} aria-label="Time (optional)" value=${rtm} onChange=${e=>setRtm(e.target.value)}/><button class="btn" onClick=${addRem}>${Ic('plus',16)}Add</button></div>
   <div class="mt-3">${rem.length===0&&h`<p class="text-sm mute">No reminders yet.</p>`}${[...rem].sort((a,b)=>(a.d+(a.tm||'')).localeCompare(b.d+(b.tm||''))).map(r=>h`<div key=${r.id} class="flex items-center gap-2 py-1"><${CK} d=${r.done} on=${()=>upd(setRem,r.id,{done:!r.done})}/><span class="flex-1" style=${{textDecoration:r.done?'line-through':'none',opacity:r.done?.5:1}}>${r.t}</span><span class="text-xs mute">${dt(r.d)}${r.tm?' '+r.tm:''}</span><${Del} on=${()=>del(setRem,r.id)}/></div>`)}</div>
@@ -344,7 +345,8 @@ function Boot(){
     const{data,error}=await sb.from('family_data').select('key,value');
     if(error){setErr(error.message);setSt('login');return}
     data.forEach(r=>{store[r.key]=r.value});
-    sb.channel('fd').on('postgres_changes',{event:'*',schema:'public',table:'family_data'},p=>{const r=p.new;if(r&&r.key&&JSON.stringify(store[r.key])!==JSON.stringify(r.value)){store[r.key]=r.value;emit(r.key)}}).subscribe();
+    const pr=await sb.from('private_data').select('key,value');(pr.data||[]).forEach(r=>{store['priv:'+r.key]=r.value});
+    sb.channel('fd').on('postgres_changes',{event:'*',schema:'public',table:'family_data'},p=>{const r=p.new;if(r&&r.key&&JSON.stringify(store[r.key])!==JSON.stringify(r.value)){store[r.key]=r.value;emit(r.key)}}).on('postgres_changes',{event:'*',schema:'public',table:'private_data'},p=>{const r=p.new;const k='priv:'+(r&&r.key);if(r&&r.key&&JSON.stringify(store[k])!==JSON.stringify(r.value)){store[k]=r.value;emit(k)}}).subscribe();
     setSt('ready')};
   useEffect(()=>{if(!sb)return;sb.auth.getSession().then(({data})=>data.session?load():setSt('login'))},[]);
   const login=async()=>{setErr('');const{error}=await sb.auth.signInWithPassword({email:em.trim(),password:pw});if(error)setErr('Anmeldung fehlgeschlagen: '+error.message);else{setSt('load');load()}};
