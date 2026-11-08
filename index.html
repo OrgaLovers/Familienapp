@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#2F6F5E">
+<meta name="theme-color" content="#FF8A5B">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Zuhause">
-<title>Zuhause – Family Organizer</title>
+<meta name="apple-mobile-web-app-title" content="Family App">
+<title>Family App</title>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
@@ -76,27 +76,56 @@ const enter=fn=>e=>{if(e.key==='Enter')fn()};
 
 const hit=(e,k)=>e.rep&&e.rep.length?k>=e.d&&e.rep.includes((new Date(...parts(k).map((v,i)=>i===1?v-1:v)).getDay()+6)%7):e.d===k;
 const WD=['Mo','Tu','We','Th','Fr','Sa','Su'];
+const Dt=({id,s=10})=>id==='all'?h`<span style=${{background:'conic-gradient('+P.map((p,i)=>p.c+' '+i*100/P.length+'% '+(i+1)*100/P.length+'%').join(',')+')',width:s,height:s,borderRadius:99,display:'inline-block',flex:'none'}}/>`:h`<${Dot} id=${id} s=${s}/>`;
+const nmOf=id=>id==='all'?'Everyone':pc(id).n;
+const shiftDay=(d,n)=>{const[y,m,dd]=parts(d);return iso(new Date(y,m-1,dd+n))};
+const fmt=(d,o)=>new Date(...parts(d).map((v,i)=>i===1?v-1:v)).toLocaleDateString('en-GB',o);
+const icsEsc=t=>String(t||'').replace(/\\/g,'\\\\').replace(/[,;]/g,m=>'\\'+m).replace(/\n/g,'\\n');
+const icsDT=(d,tm)=>d.replace(/-/g,'')+'T'+tm.replace(':','')+'00';
+function icsEv(e,d){
+  const L=['BEGIN:VEVENT','UID:'+e.id+d+'@familyapp','DTSTAMP:'+new Date().toISOString().replace(/[-:]/g,'').slice(0,15)+'Z','SUMMARY:'+icsEsc(e.t)];
+  if(e.tm){const en=e.te||(pad((+e.tm.slice(0,2)+1)%24)+e.tm.slice(2));L.push('DTSTART:'+icsDT(d,e.tm),'DTEND:'+icsDT(en<=e.tm?shiftDay(d,1):d,en))}
+  else L.push('DTSTART;VALUE=DATE:'+d.replace(/-/g,''),'DTEND;VALUE=DATE:'+shiftDay(d,1).replace(/-/g,''));
+  if(e.pl)L.push('LOCATION:'+icsEsc(e.pl));if(e.nt)L.push('DESCRIPTION:'+icsEsc(e.nt));
+  L.push('END:VEVENT');return L}
+async function icsSave(list){
+  const txt=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//FamilyApp//DE',...list.flatMap(([e,d])=>icsEv(e,d)),'END:VCALENDAR'].join('\r\n');
+  const name=(list.length>1?'family-events':(list[0][0].t||'event').replace(/[^\w-]+/g,'_'))+'.ics';
+  try{const f=new File([txt],name,{type:'text/calendar'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:list[0][0].t});return}}catch(x){if(x&&x.name==='AbortError')return}
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/calendar'}));a.download=name;document.body.appendChild(a);a.click();a.remove()}
 function Cal(){
   const[ev,setEv]=useLS('fo-ev',[{id:uid(),t:'Kita pickup',p:'c1',d:TODAY,tm:'16:00'},{id:uid(),t:'Dentist',p:'me',d:addDays(1),tm:'09:30'},{id:uid(),t:'Football practice',p:'c2',d:addDays(2),tm:'17:00'},{id:uid(),t:'Date night',p:'partner',d:addDays(3),tm:'19:30'},{id:uid(),t:'Family brunch',p:'me',d:addDays(5),tm:'10:30'}]);
-  const[ym,setYm]=useState([NOW.getFullYear(),NOW.getMonth()]);const[sel,setSel]=useState(TODAY);const[f,setF]=useState('all');
-  const[t,setT]=useState('');const[p,setP]=useState('me');const[tm,setTm]=useState('');const[te,setTe]=useState('');const[pl,setPl]=useState('');const[rep,setRep]=useState([]);const[nt,setNt]=useState('');
-  const[y,m]=ym;const off=(new Date(y,m,1).getDay()+6)%7;const n=new Date(y,m+1,0).getDate();
+  const[sel,setSel]=useState(TODAY);const[view,setView]=useState('month');const[f,setF]=useState('all');
+  const[t,setT]=useState('');const[p,setP]=useState('me');const[tm,setTm]=useState('');const[te,setTe]=useState('');const[pl,setPl]=useState('');const[rep,setRep]=useState([]);const[nt,setNt]=useState('');const[cal,setCal]=useState(false);const[eid,setEid]=useState(null);const[ed,setEd]=useState('');
+  const[y,m,dd]=parts(sel).map((v,i)=>i===1?v-1:v);const WDN=['Mo','Tu','We','Th','Fr','Sa','Su'];
+  const off=(new Date(y,m,1).getDay()+6)%7;const n=new Date(y,m+1,0).getDate();
   const cells=[...Array(off).fill(null),...Array.from({length:n},(_,i)=>i+1)];
-  const vis=ev.filter(e=>f==='all'||e.p===f);
-  const day=vis.filter(e=>hit(e,sel)).sort((a,b)=>(a.tm||'').localeCompare(b.tm||''));
-  const go=k=>{const d=new Date(y,m+k,1);setYm([d.getFullYear(),d.getMonth()])};
-  const add=()=>{if(!t.trim())return;const base={t:t.trim(),p,tm,te:tm?te:'',pl:pl.trim(),nt:nt.trim()};const[sy,sm,sd]=parts(sel);const dow=(new Date(sy,sm-1,sd).getDay()+6)%7;const dates=[...new Set([sel,...rep.map(i=>iso(new Date(sy,sm-1,sd-dow+i)))])];setEv(a=>[...a,...dates.map(d=>({id:uid(),d,...base}))]);setT('');setTm('');setTe('');setPl('');setNt('');setRep([])};
-  return h`<section class="card p-5"><${Head} ic="cal" t="Family calendar" sub="Tap a day to see or add plans" col="#3D8FD1"/>
+  const vis=ev.filter(e=>f==='all'||e.p===f||e.p==='all');
+  const byT=(a,b)=>(a.tm||'').localeCompare(b.tm||'');
+  const day=vis.filter(e=>hit(e,sel)).sort(byT);
+  const mon=shiftDay(sel,-((new Date(y,m,dd).getDay()+6)%7));const week=[0,1,2,3,4,5,6].map(i=>shiftDay(mon,i));
+  const go=k=>view==='week'?setSel(shiftDay(sel,7*k)):setSel(iso(new Date(y,m+k,1)));
+  const col=id=>id==='all'?'var(--brand)':pc(id).c;
+  const reset=()=>{setT('');setTm('');setTe('');setPl('');setNt('');setRep([]);setCal(false);setEid(null);setEd('')};
+  const add=()=>{if(!t.trim())return;const base={t:t.trim(),p,tm,te:tm?te:'',pl:pl.trim(),nt:nt.trim()};
+    if(eid){setEv(a=>a.map(x=>x.id===eid?{...x,...base,d:ed||x.d}:x));if(cal)icsSave([[{...base,id:eid},ed||sel]]);reset();return}
+    const dow=(new Date(y,m,dd).getDay()+6)%7;const dates=[...new Set([sel,...rep.map(i=>shiftDay(sel,i-dow))])];const made=dates.map(d=>({id:uid(),d,...base}));setEv(a=>[...a,...made]);if(cal)icsSave(made.map(e=>[e,e.d]));reset()};
+  const startEdit=e=>{setEid(e.id);setT(e.t);setTm(e.tm||'');setTe(e.te||'');setP(e.p);setPl(e.pl||'');setNt(e.nt||'');setEd(e.d);setRep([]);setCal(false);setTimeout(()=>{const el=document.getElementById('evform');if(el)el.scrollIntoView({behavior:'smooth',block:'center'})},50)};
+  const Row=(e,d)=>h`<div key=${e.id+d} class="flex items-start gap-3 py-1.5"><span class="pt-1"><${Dt} id=${e.p} s=${12}/></span><span class="text-sm mute flex-none" style=${{width:92}}>${e.tm?(e.te?e.tm+'–'+e.te:e.tm):'all day'}</span><span class="flex-1 min-w-0"><b class="block">${e.t}</b><span class="text-xs mute block">${nmOf(e.p)}</span>${e.pl&&h`<span class="text-xs mute block">📍 ${e.pl}</span>`}${e.nt&&h`<span class="text-xs mute block">📝 ${e.nt}</span>`}</span><button class="mute hover:text-sky-500 p-1" aria-label="Edit" onClick=${()=>startEdit(e)}>${Ic('edit',16)}</button><${Del} on=${()=>del(setEv,e.id)}/></div>`;
+  const seg=(v,l)=>h`<button class="chip" style=${view===v?{background:'var(--brand)',color:'#fff',borderColor:'var(--brand)'}:{}} onClick=${()=>setView(v)}>${l}</button>`;
+  return h`<section class="card p-5"><${Head} ic="cal" t="Family calendar" sub="Month or week view. Tap a day to add plans" col="#3D8FD1"/>
+  <div class="flex flex-wrap gap-2 mb-3">${seg('month','Month')}${seg('week','Week')}</div>
   <div class="flex flex-wrap gap-2 mb-4"><button class="chip" style=${f==='all'?{background:'var(--brand)',color:'#fff',borderColor:'var(--brand)'}:{}} onClick=${()=>setF('all')}>Everyone</button>
   ${P.map(q=>h`<button key=${q.id} class="chip flex items-center gap-2" style=${f===q.id?{background:q.c,color:'#fff',borderColor:q.c}:{}} onClick=${()=>setF(q.id)}>${f!==q.id&&h`<${Dot} id=${q.id} s=${8}/>`}${q.n}</button>`)}</div>
-  <div class="flex items-center justify-between mb-2"><button class="p-2" aria-label="Previous month" onClick=${()=>go(-1)}>${Ic('left')}</button><b class="text-lg">${new Date(y,m,1).toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</b><button class="p-2" aria-label="Next month" onClick=${()=>go(1)}>${Ic('right')}</button></div>
-  <div class="grid grid-cols-7 gap-1 text-center text-xs mute mb-1">${['Mo','Tu','We','Th','Fr','Sa','Su'].map(d=>h`<div key=${d}>${d}</div>`)}</div>
+  <div class="flex items-center justify-between mb-2"><button class="p-2" aria-label="Previous" onClick=${()=>go(-1)}>${Ic('left')}</button><b class="text-lg text-center">${view==='week'?fmt(week[0],{day:'numeric',month:'short'})+' – '+fmt(week[6],{day:'numeric',month:'short',year:'numeric'}):fmt(sel,{month:'long',year:'numeric'})}</b><button class="p-2" aria-label="Next" onClick=${()=>go(1)}>${Ic('right')}</button></div>
+  ${view==='month'&&h`<div><div class="grid grid-cols-7 gap-1 text-center text-xs mute mb-1">${WDN.map(d=>h`<div key=${d}>${d}</div>`)}</div>
   <div class="grid grid-cols-7 gap-1">${cells.map((d,i)=>{if(!d)return h`<div key=${'x'+i}/>`;const k=`${y}-${pad(m+1)}-${pad(d)}`;const es=vis.filter(e=>hit(e,k));const on=k===sel;
-    return h`<button key=${k} onClick=${()=>setSel(k)} class="rounded-xl py-1.5 flex flex-col items-center gap-1 min-h-[52px]" style=${{background:on?'var(--brand)':k===TODAY?'var(--soft)':'transparent',color:on?'#fff':'inherit',fontWeight:k===TODAY?800:500}}><span class="text-sm">${d}</span><span class="flex gap-0.5 h-2">${es.slice(0,4).map(e=>h`<${Dot} key=${e.id} id=${e.p} s=${6}/>`)}</span></button>`})}</div>
-  <div class="mt-4 pt-4" style=${{borderTop:'1px solid var(--line)'}}><p class="font-bold mb-2">${new Date(...parts(sel).map((x,i)=>i===1?x-1:x)).toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</p>
-  ${day.length===0&&h`<p class="text-sm mute mb-2">Nothing planned. Add the first thing below.</p>`}
-  ${day.map(e=>h`<div key=${e.id} class="flex items-center gap-3 py-1.5"><${Dot} id=${e.p} s=${12}/><span class="text-sm mute flex-none" style=${{width:92}}>${e.tm?(e.te?e.tm+'–'+e.te:e.tm):'all day'}</span><span class="flex-1 min-w-0"><b class="block">${e.t}</b>${e.pl&&h`<span class="text-xs mute block">📍 ${e.pl}</span>`}${e.nt&&h`<span class="text-xs mute block">📝 ${e.nt}</span>`}</span><span class="text-xs mute">${pc(e.p).n}</span><${Del} on=${()=>del(setEv,e.id)}/></div>`)}
-  <div class="flex flex-wrap gap-2 mt-3"><input class="inp" style=${{flex:'1 1 150px'}} placeholder="New event" value=${t} onInput=${e=>setT(e.target.value)} onKeyDown=${enter(add)}/><input type="time" class="inp" style=${{width:108}} aria-label="Start time" value=${tm} onChange=${e=>setTm(e.target.value)}/><span class="mute">to</span><input type="time" class="inp" style=${{width:108}} aria-label="End time (optional)" value=${te} onChange=${e=>setTe(e.target.value)}/><${PSel} v=${p} on=${setP}/><button class="btn" onClick=${add}>${Ic('plus',16)}Add</button></div><input class="inp mt-2" placeholder="Place (optional), e.g. Office, Musterstr. 5" value=${pl} onInput=${e=>setPl(e.target.value)} aria-label="Place"/><input class="inp mt-2" placeholder="Note (optional), e.g. take ID" value=${nt} onInput=${e=>setNt(e.target.value)} aria-label="Note"/><div class="flex flex-wrap items-center gap-1.5 mt-2"><span class="text-sm mute">Also add to this week:</span>${WD.map((w,i)=>h`<button key=${w} class="chip" aria-pressed=${rep.includes(i)} style=${rep.includes(i)?{background:pc(p).c,color:'#fff',borderColor:pc(p).c}:{}} onClick=${()=>setRep(r=>r.includes(i)?r.filter(z=>z!==i):[...r,i])}>${w}</button>`)}</div>${rep.length>0&&h`<p class="text-xs mute mt-1">Adds a separate copy to each chosen day of this week only, so you can change single days later.</p>`}</div></section>`;
+    return h`<button key=${k} onClick=${()=>setSel(k)} class="rounded-xl py-1.5 flex flex-col items-center gap-1 min-h-[52px]" style=${{background:on?'var(--brand)':k===TODAY?'var(--soft)':'transparent',color:on?'#fff':'inherit',fontWeight:k===TODAY?800:500}}><span class="text-sm">${d}</span><span class="flex gap-0.5 h-2">${es.slice(0,4).map(e=>h`<${Dt} key=${e.id} id=${e.p} s=${6}/>`)}</span></button>`})}</div></div>`}
+  ${view==='week'&&h`<div>${week.map(d=>{const es=vis.filter(e=>hit(e,d)).sort(byT);return h`<div key=${d} class="rounded-2xl p-3 mb-2" style=${{background:d===sel?'var(--soft)':'var(--bg)',border:d===TODAY?'2px solid var(--brand)':'1px solid var(--line)'}}><button class="font-bold w-full text-left" onClick=${()=>setSel(d)}>${fmt(d,{weekday:'long',day:'numeric',month:'short'})}${d===TODAY?' (today)':''}</button>${es.length===0&&h`<p class="text-xs mute">Free</p>`}${es.map(e=>Row(e,d))}</div>`})}</div>`}
+  <div id="evform" class="mt-4 pt-4" style=${{borderTop:'1px solid var(--line)'}}><p class="font-bold mb-2">${eid?'Edit event':(view==='week'?'Add on ':'')+fmt(sel,{weekday:'long',day:'numeric',month:'long'})}</p>
+  ${view==='month'&&day.length===0&&h`<p class="text-sm mute mb-2">Nothing planned. Add the first thing below.</p>`}
+  ${view==='month'&&day.map(e=>Row(e,sel))}
+  <div class="flex flex-wrap gap-2 mt-3"><input class="inp" style=${{flex:'1 1 150px'}} placeholder="New event" value=${t} onInput=${e=>setT(e.target.value)} onKeyDown=${enter(add)}/><input type="time" class="inp" style=${{width:108}} aria-label="Start time" value=${tm} onChange=${e=>setTm(e.target.value)}/><span class="mute">to</span><input type="time" class="inp" style=${{width:108}} aria-label="End time (optional)" value=${te} onChange=${e=>setTe(e.target.value)}/><select class="inp" style=${{width:'auto'}} value=${p} onChange=${e=>setP(e.target.value)} aria-label="Who"><option value="all">Everyone</option>${P.map(q=>h`<option key=${q.id} value=${q.id}>${q.n}</option>`)}</select><button class="btn" onClick=${add}>${Ic(eid?'check':'plus',16)}${eid?'Save':'Add'}</button></div>${eid&&h`<label class="text-xs mute block mt-2">Date<input type="date" class="inp mt-1" style=${{width:160}} value=${ed} onChange=${e=>setEd(e.target.value)}/></label>`}<input class="inp mt-2" placeholder="Place (optional), e.g. Office, Musterstr. 5" value=${pl} onInput=${e=>setPl(e.target.value)} aria-label="Place"/><input class="inp mt-2" placeholder="Note (optional), e.g. take ID" value=${nt} onInput=${e=>setNt(e.target.value)} aria-label="Note"/><div class="flex flex-wrap items-center gap-1.5 mt-2" style=${{display:eid?'none':'flex'}}><span class="text-sm mute">Also add to this week:</span>${WDN.map((w,i)=>h`<button key=${w} class="chip" aria-pressed=${rep.includes(i)} style=${rep.includes(i)?{background:col(p),color:'#fff',borderColor:col(p)}:{}} onClick=${()=>setRep(r=>r.includes(i)?r.filter(z=>z!==i):[...r,i])}>${w}</button>`)}</div>${rep.length>0&&h`<p class="text-xs mute mt-1">Adds a separate copy to each chosen day of this week only, so you can change single days later.</p>`}<label class="flex items-center gap-2 text-sm mt-3"><input type="checkbox" checked=${cal} onChange=${e=>setCal(e.target.checked)}/>Also add to my phone calendar</label>${eid&&h`<button class="chip mt-3" onClick=${reset}>Cancel editing</button>`}</div></section>`;
 }
 
 function Grocery({g,setG}){
@@ -327,7 +356,7 @@ function App(){
   const addRem=()=>{if(!rt.trim())return;setRem(a=>[...a,{id:uid(),t:rt.trim(),d:rd||TODAY,tm:rtm,done:false,n:false}]);setRt('');setRtm('')};
   const tabs=[['hub','home','Alltag','Daily hub'],['kids','cake','Geburtstage & Einladungen','Kids & birthdays'],['gift','gift','Wunschlisten','Gift ideas'],['meal','cart','Essensplaner','Meals & groceries'],['fin','coin','Finanzplaner','Family ledger'],['sos','shield','Notfall-Ordner','Emergency folder'],['pack','suit','Packlisten','Checklists']];
   return h`<div class="max-w-6xl mx-auto px-4 pb-10">
-  <header class="pt-6 pb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 class="text-4xl font-extrabold tracking-tight" style=${{color:'var(--brand)'}}>Zuhause</h1><p class="mute">${NOW.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</p></div><div class="flex flex-wrap gap-x-3 gap-y-1">${P.map(p=>h`<span key=${p.id} class="flex items-center gap-1.5 text-sm font-semibold"><${Dot} id=${p.id}/>${p.n}</span>`)}</div><div class="flex flex-wrap gap-2 w-full"><button class="chip flex items-center gap-1.5" onClick=${()=>setOpen(!open)}>${Ic('edit',14)}Names & colors</button><button class="chip flex items-center gap-1.5" onClick=${()=>setRo(!ro)}>${Ic('bell',14)}Reminders${due.length>0?' ('+due.length+')':''}</button>${sb&&h`<button class="chip" onClick=${async()=>{await sb.auth.signOut();location.reload()}}>Abmelden</button>`}</div></header>
+  <header class="pt-6 pb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 class="text-4xl font-extrabold tracking-tight" style=${{color:'var(--brand)'}}>Family App</h1><p class="mute">${NOW.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</p></div><div class="flex flex-wrap gap-x-3 gap-y-1">${P.map(p=>h`<span key=${p.id} class="flex items-center gap-1.5 text-sm font-semibold"><${Dot} id=${p.id}/>${p.n}</span>`)}</div><div class="flex flex-wrap gap-2 w-full"><button class="chip flex items-center gap-1.5" onClick=${()=>setOpen(!open)}>${Ic('edit',14)}Names & colors</button><button class="chip flex items-center gap-1.5" onClick=${()=>setRo(!ro)}>${Ic('bell',14)}Reminders${due.length>0?' ('+due.length+')':''}</button>${sb&&h`<button class="chip" onClick=${async()=>{await sb.auth.signOut();location.reload()}}>Abmelden</button>`}</div></header>
   ${bdToday.length>0&&h`<div role="dialog" aria-modal="true" style=${{position:'fixed',inset:0,zIndex:50,background:'rgba(0,0,0,.5)',display:'grid',placeItems:'center',padding:16}}><div class="card p-6 text-center" style=${{maxWidth:380,width:'100%',border:'2px solid #E9A21B'}}><div style=${{fontSize:52}}>🎉</div><h2 class="text-2xl font-extrabold mb-2">Birthday today!</h2>${bdToday.map(b=>{const a=T0.getFullYear()-parts(b.d)[0];return h`<p key=${b.id} class="text-lg font-semibold">Today is ${b.n}’s birthday${a>0&&a<120?' (turns '+a+')':''}</p>`})}<p class="text-sm mute mt-2">Time to call or send a message.</p><button class="btn mt-4" onClick=${()=>setBdToday([])}>Got it</button></div></div>`}
   ${ro&&h`<div class="card p-4 mb-4"><p class="font-bold mb-3">Reminders</p><div class="flex flex-wrap gap-2"><input class="inp" style=${{flex:'1 1 160px'}} placeholder="Remind me to..." value=${rt} onInput=${e=>setRt(e.target.value)} onKeyDown=${enter(addRem)}/><input type="date" class="inp" style=${{width:150}} value=${rd} onChange=${e=>setRd(e.target.value)}/><input type="time" class="inp" style=${{width:108}} aria-label="Time (optional)" value=${rtm} onChange=${e=>setRtm(e.target.value)}/><button class="btn" onClick=${addRem}>${Ic('plus',16)}Add</button></div>
   <div class="mt-3">${rem.length===0&&h`<p class="text-sm mute">No reminders yet.</p>`}${[...rem].sort((a,b)=>(a.d+(a.tm||'')).localeCompare(b.d+(b.tm||''))).map(r=>h`<div key=${r.id} class="flex items-center gap-2 py-1"><${CK} d=${r.done} on=${()=>upd(setRem,r.id,{done:!r.done})}/><span class="flex-1" style=${{textDecoration:r.done?'line-through':'none',opacity:r.done?.5:1}}>${r.t}</span><span class="text-xs mute">${dt(r.d)}${r.tm?' '+r.tm:''}</span><${Del} on=${()=>del(setRem,r.id)}/></div>`)}</div>
@@ -352,7 +381,7 @@ function Boot(){
   const login=async()=>{setErr('');const{error}=await sb.auth.signInWithPassword({email:em.trim(),password:pw});if(error)setErr('Anmeldung fehlgeschlagen: '+error.message);else{setSt('load');load()}};
   if(st==='ready')return h`<${App}/>`;
   if(st==='load')return h`<p class="p-8 mute">Lade Familiendaten...</p>`;
-  return h`<div class="min-h-screen grid place-items-center p-4"><div class="card p-6 w-full" style=${{maxWidth:380}}><h1 class="text-3xl font-extrabold mb-1" style=${{color:'var(--brand)'}}>Zuhause</h1><p class="mute mb-4">Bitte anmelden (gleiches Login für die ganze Familie).</p><input class="inp mb-2" type="email" placeholder="E-Mail" value=${em} onInput=${e=>setEm(e.target.value)}/><input class="inp mb-3" type="password" placeholder="Passwort" value=${pw} onInput=${e=>setPw(e.target.value)} onKeyDown=${enter(login)}/>${err&&h`<p class="text-sm mb-3" style=${{color:'#E0566B'}}>${err}</p>`}<button class="btn w-full justify-center" onClick=${login}>Anmelden</button></div></div>`;
+  return h`<div class="min-h-screen grid place-items-center p-4"><div class="card p-6 w-full" style=${{maxWidth:380}}><h1 class="text-3xl font-extrabold mb-1" style=${{color:'var(--brand)'}}>Family App</h1><p class="mute mb-4">Bitte anmelden (gleiches Login für die ganze Familie).</p><input class="inp mb-2" type="email" placeholder="E-Mail" value=${em} onInput=${e=>setEm(e.target.value)}/><input class="inp mb-3" type="password" placeholder="Passwort" value=${pw} onInput=${e=>setPw(e.target.value)} onKeyDown=${enter(login)}/>${err&&h`<p class="text-sm mb-3" style=${{color:'#E0566B'}}>${err}</p>`}<button class="btn w-full justify-center" onClick=${login}>Anmelden</button></div></div>`;
 }
 ReactDOM.createRoot(document.getElementById('root')).render(h`<${Boot}/>`);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
